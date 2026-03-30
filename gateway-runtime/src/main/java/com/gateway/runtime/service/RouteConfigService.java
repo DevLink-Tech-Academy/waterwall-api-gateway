@@ -234,7 +234,7 @@ public class RouteConfigService {
 
     private List<GatewayRoute> loadRoutes() {
         String sql = """
-                SELECT r.id, r.api_id, r.path, r.method, r.upstream_url,
+                SELECT r.id, r.api_id, a.name as api_name, r.path, r.method, r.upstream_url,
                        r.auth_types, r.priority, r.strip_prefix, r.enabled,
                        a.backend_base_url, a.status as api_status
                 FROM gateway.routes r
@@ -262,6 +262,7 @@ public class RouteConfigService {
             return GatewayRoute.builder()
                     .routeId(rs.getObject("id", UUID.class))
                     .apiId(rs.getObject("api_id", UUID.class))
+                    .apiName(rs.getString("api_name"))
                     .path(rs.getString("path"))
                     .method(rs.getString("method"))
                     .upstreamUrl(upstreamUrl)

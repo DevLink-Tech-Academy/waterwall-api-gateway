@@ -1,0 +1,15 @@
+**/node_modules
+**/.next
+**/target
+**/.git
+**/*.log
+*.md
+!README.md
+logos/
+catalogue.png
+architecture/
+api-specs/
+.claude/
+.github/
+client-cert.pem
+client-key.pem

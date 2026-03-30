@@ -1,10 +1,9 @@
 package com.gateway.analytics.service;
 
-import com.gateway.analytics.dto.TopApiEntry;
+import com.gateway.analytics.store.RequestLogStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -22,7 +21,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class ReportSchedulerService {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final RequestLogStore store;
     private final JavaMailSender mailSender;
 
     @Value("${spring.mail.properties.mail.smtp.from:noreply@example.com}")
@@ -140,19 +139,19 @@ public class ReportSchedulerService {
 
     String generateReportHtml(String reportType, String interval) {
         // Summary stats
-        Map<String, Object> summary = querySummary(interval);
+        Map<String, Object> summary = store.getReportSummary(interval);
         long totalRequests = ((Number) summary.get("total_requests")).longValue();
         double errorRate = ((Number) summary.get("error_rate")).doubleValue();
         double avgLatency = ((Number) summary.get("avg_latency")).doubleValue();
 
         // Top 5 APIs by traffic
-        List<TopApiEntry> topApis = queryTopApis(interval, 5);
+        List<Map<String, Object>> topApis = store.getReportTopApis(interval, 5);
 
         // Top 5 errors
-        List<Map<String, Object>> topErrors = queryTopErrors(interval, 5);
+        List<Map<String, Object>> topErrors = store.getReportTopErrors(interval, 5);
 
         // SLA violations (latency > 1000ms or error_rate > 5%)
-        List<Map<String, Object>> slaViolations = querySlaViolations(interval);
+        List<Map<String, Object>> slaViolations = store.getReportSlaViolations(interval);
 
         StringBuilder html = new StringBuilder();
         html.append("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
@@ -193,13 +192,15 @@ public class ReportSchedulerService {
         html.append("<h2>Top 5 APIs by Traffic</h2>");
         html.append("<table><tr><th>API ID</th><th>Requests</th><th>Errors</th>")
                 .append("<th>Avg Latency (ms)</th><th>Error Rate (%)</th></tr>");
-        for (TopApiEntry api : topApis) {
+        for (Map<String, Object> api : topApis) {
             html.append("<tr>");
-            html.append("<td>").append(api.getApiId()).append("</td>");
-            html.append("<td>").append(api.getRequestCount()).append("</td>");
-            html.append("<td>").append(api.getErrorCount()).append("</td>");
-            html.append("<td>").append(String.format("%.1f", api.getAvgLatencyMs())).append("</td>");
-            html.append("<td>").append(String.format("%.2f", api.getErrorRate())).append("</td>");
+            html.append("<td>").append(api.get("api_id")).append("</td>");
+            html.append("<td>").append(api.get("request_count")).append("</td>");
+            html.append("<td>").append(api.get("error_count")).append("</td>");
+            html.append("<td>").append(String.format("%.1f",
+                    ((Number) api.get("avg_latency")).doubleValue())).append("</td>");
+            html.append("<td>").append(String.format("%.2f",
+                    ((Number) api.get("error_rate")).doubleValue())).append("</td>");
             html.append("</tr>");
         }
         html.append("</table>");
@@ -239,107 +240,6 @@ public class ReportSchedulerService {
 
         html.append("</body></html>");
         return html.toString();
-    }
-
-    // ── Query Helpers ───────────────────────────────────────────────────
-
-    private Map<String, Object> querySummary(String interval) {
-        String sql = """
-            SELECT
-                COUNT(*) AS total_requests,
-                COALESCE(AVG(latency_ms), 0) AS avg_latency,
-                COALESCE(
-                    COUNT(*) FILTER (WHERE status_code >= 400) * 100.0 / NULLIF(COUNT(*), 0),
-                    0
-                ) AS error_rate
-            FROM analytics.request_logs
-            WHERE created_at >= NOW() - INTERVAL '%s'
-            """.formatted(interval);
-        return jdbcTemplate.queryForMap(sql);
-    }
-
-    private List<TopApiEntry> queryTopApis(String interval, int limit) {
-        String sql = """
-            SELECT
-                api_id,
-                COUNT(*) AS request_count,
-                COUNT(*) FILTER (WHERE status_code >= 400) AS error_count,
-                COALESCE(AVG(latency_ms), 0) AS avg_latency,
-                COALESCE(
-                    COUNT(*) FILTER (WHERE status_code >= 400) * 100.0 / NULLIF(COUNT(*), 0),
-                    0
-                ) AS error_rate
-            FROM analytics.request_logs
-            WHERE created_at >= NOW() - INTERVAL '%s'
-            GROUP BY api_id
-            ORDER BY request_count DESC
-            LIMIT ?
-            """.formatted(interval);
-
-        return jdbcTemplate.query(sql, (rs, rowNum) -> TopApiEntry.builder()
-                .apiId(rs.getObject("api_id", UUID.class))
-                .requestCount(rs.getLong("request_count"))
-                .errorCount(rs.getLong("error_count"))
-                .avgLatencyMs(Math.round(rs.getDouble("avg_latency") * 100.0) / 100.0)
-                .errorRate(Math.round(rs.getDouble("error_rate") * 100.0) / 100.0)
-                .build(), limit);
-    }
-
-    private List<Map<String, Object>> queryTopErrors(String interval, int limit) {
-        String sql = """
-            SELECT
-                status_code,
-                COALESCE(error_code, 'UNKNOWN') AS error_code,
-                COUNT(*) AS cnt
-            FROM analytics.request_logs
-            WHERE status_code >= 400
-              AND created_at >= NOW() - INTERVAL '%s'
-            GROUP BY status_code, error_code
-            ORDER BY cnt DESC
-            LIMIT ?
-            """.formatted(interval);
-
-        return jdbcTemplate.query(sql, (rs, rowNum) -> {
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("status_code", rs.getInt("status_code"));
-            row.put("error_code", rs.getString("error_code"));
-            row.put("cnt", rs.getLong("cnt"));
-            return row;
-        }, limit);
-    }
-
-    private List<Map<String, Object>> querySlaViolations(String interval) {
-        String sql = """
-            SELECT
-                api_id,
-                COALESCE(AVG(latency_ms), 0) AS avg_latency,
-                COALESCE(
-                    COUNT(*) FILTER (WHERE status_code >= 400) * 100.0 / NULLIF(COUNT(*), 0),
-                    0
-                ) AS error_rate
-            FROM analytics.request_logs
-            WHERE created_at >= NOW() - INTERVAL '%s'
-            GROUP BY api_id
-            HAVING AVG(latency_ms) > 1000
-               OR (COUNT(*) FILTER (WHERE status_code >= 400) * 100.0 / NULLIF(COUNT(*), 0)) > 5
-            """.formatted(interval);
-
-        return jdbcTemplate.query(sql, (rs, rowNum) -> {
-            Map<String, Object> row = new LinkedHashMap<>();
-            double avgLatency = rs.getDouble("avg_latency");
-            double errorRate = rs.getDouble("error_rate");
-
-            row.put("api_id", rs.getObject("api_id", UUID.class));
-            row.put("avg_latency", avgLatency);
-            row.put("error_rate", errorRate);
-
-            List<String> violations = new ArrayList<>();
-            if (avgLatency > 1000) violations.add("High latency (>" + "1000ms)");
-            if (errorRate > 5) violations.add("High error rate (>5%)");
-            row.put("violation", String.join(", ", violations));
-
-            return row;
-        });
     }
 
     // ── Email Sending ───────────────────────────────────────────────────

@@ -8,10 +8,10 @@ import com.gateway.analytics.entity.SlaBreachEntity;
 import com.gateway.analytics.entity.SlaConfigEntity;
 import com.gateway.analytics.repository.SlaBreachRepository;
 import com.gateway.analytics.repository.SlaConfigRepository;
+import com.gateway.analytics.store.RequestLogStore;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,7 +21,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -35,7 +34,7 @@ public class SlaMonitoringService {
 
     private final SlaConfigRepository slaConfigRepository;
     private final SlaBreachRepository slaBreachRepository;
-    private final JdbcTemplate jdbcTemplate;
+    private final RequestLogStore requestLogStore;
 
     private static final int WINDOW_MINUTES = 5;
 
@@ -62,11 +61,10 @@ public class SlaMonitoringService {
     private void evaluateConfig(SlaConfigEntity config) {
         Instant now = Instant.now();
         UUID apiId = config.getApiId();
-        String apiFilter = " AND api_id = '" + apiId + "'";
 
         // ── Uptime check: % of non-5xx responses ────────────────────────
         if (config.getUptimeTarget() != null) {
-            BigDecimal uptime = queryUptime(apiFilter);
+            BigDecimal uptime = requestLogStore.queryMetric("uptime", WINDOW_MINUTES, apiId);
             if (uptime != null && uptime.compareTo(config.getUptimeTarget()) < 0) {
                 recordBreach(config, "UPTIME", config.getUptimeTarget(), uptime,
                         String.format("Uptime %.2f%% is below target %.2f%% for API '%s'",
@@ -79,7 +77,7 @@ public class SlaMonitoringService {
 
         // ── Latency P95 check ───────────────────────────────────────────
         if (config.getLatencyTargetMs() != null) {
-            BigDecimal p95 = queryLatencyP95(apiFilter);
+            BigDecimal p95 = requestLogStore.queryMetric("latency_p95", WINDOW_MINUTES, apiId);
             BigDecimal target = BigDecimal.valueOf(config.getLatencyTargetMs());
             if (p95 != null && p95.compareTo(target) > 0) {
                 recordBreach(config, "LATENCY_P95", target, p95,
@@ -93,7 +91,7 @@ public class SlaMonitoringService {
 
         // ── Error rate check: % of 4xx + 5xx ────────────────────────────
         if (config.getErrorBudgetPct() != null) {
-            BigDecimal errorRate = queryErrorRate(apiFilter);
+            BigDecimal errorRate = requestLogStore.queryMetric("error_rate", WINDOW_MINUTES, apiId);
             if (errorRate != null && errorRate.compareTo(config.getErrorBudgetPct()) > 0) {
                 recordBreach(config, "ERROR_RATE", config.getErrorBudgetPct(), errorRate,
                         String.format("Error rate %.2f%% exceeds budget %.2f%% for API '%s'",
@@ -102,61 +100,6 @@ public class SlaMonitoringService {
             } else {
                 resolveBreaches(config.getId(), "ERROR_RATE");
             }
-        }
-    }
-
-    // ── Metric Queries ──────────────────────────────────────────────────
-
-    private BigDecimal queryUptime(String apiFilter) {
-        String sql = """
-                SELECT COALESCE(
-                    COUNT(*) FILTER (WHERE status_code < 500) * 100.0 / NULLIF(COUNT(*), 0),
-                    100
-                ) AS value
-                FROM analytics.request_logs
-                WHERE created_at >= NOW() - INTERVAL '%s minutes'
-                  AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(WINDOW_MINUTES, apiFilter);
-        return querySingleValue(sql);
-    }
-
-    private BigDecimal queryLatencyP95(String apiFilter) {
-        String sql = """
-                SELECT COALESCE(
-                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms),
-                    0
-                ) AS value
-                FROM analytics.request_logs
-                WHERE created_at >= NOW() - INTERVAL '%s minutes'
-                  AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(WINDOW_MINUTES, apiFilter);
-        return querySingleValue(sql);
-    }
-
-    private BigDecimal queryErrorRate(String apiFilter) {
-        String sql = """
-                SELECT COALESCE(
-                    COUNT(*) FILTER (WHERE status_code >= 400) * 100.0 / NULLIF(COUNT(*), 0),
-                    0
-                ) AS value
-                FROM analytics.request_logs
-                WHERE created_at >= NOW() - INTERVAL '%s minutes'
-                  AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(WINDOW_MINUTES, apiFilter);
-        return querySingleValue(sql);
-    }
-
-    private BigDecimal querySingleValue(String sql) {
-        try {
-            Map<String, Object> result = jdbcTemplate.queryForMap(sql);
-            Object value = result.get("value");
-            if (value instanceof Number number) {
-                return BigDecimal.valueOf(number.doubleValue());
-            }
-            return null;
-        } catch (Exception e) {
-            log.debug("Failed to query SLA metric: {}", e.getMessage());
-            return null;
         }
     }
 
@@ -275,11 +218,11 @@ public class SlaMonitoringService {
         List<SlaDashboardEntry> entries = new ArrayList<>();
 
         for (SlaConfigEntity config : configs) {
-            String apiFilter = " AND api_id = '" + config.getApiId() + "'";
+            UUID apiId = config.getApiId();
 
-            BigDecimal uptimeActual = queryUptime(apiFilter);
-            BigDecimal p95Actual = queryLatencyP95(apiFilter);
-            BigDecimal errorRateActual = queryErrorRate(apiFilter);
+            BigDecimal uptimeActual = requestLogStore.queryMetric("uptime", WINDOW_MINUTES, apiId);
+            BigDecimal p95Actual = requestLogStore.queryMetric("latency_p95", WINDOW_MINUTES, apiId);
+            BigDecimal errorRateActual = requestLogStore.queryMetric("error_rate", WINDOW_MINUTES, apiId);
 
             boolean uptimeOk = config.getUptimeTarget() == null || uptimeActual == null
                     || uptimeActual.compareTo(config.getUptimeTarget()) >= 0;

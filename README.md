@@ -140,36 +140,88 @@ PostgreSQL with four schemas, managed by Liquibase migrations:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-org/waterwall.git
-cd waterwall
+git clone https://github.com/DevLink-Tech-Academy/waterwall-api-gateway.git
+cd waterwall-api-gateway
 ```
 
-### 2. Configure environment
+### 2. Start all services (zero configuration needed)
 
-```bash
-cp deploy/docker/.env.example deploy/docker/.env
-# Edit .env with your preferred settings
-```
-
-### 3. Start all services
+A pre-configured `.env` file is included. No edits required for local development.
 
 ```bash
 cd deploy/docker
 docker compose up -d
 ```
 
-### 4. Access the platform
+This builds and starts **9 containers**: PostgreSQL, RabbitMQ, 5 backend services, and 2 frontend portals. The first build takes a few minutes (Maven + npm dependencies are cached for subsequent builds).
 
-| Service | URL |
-|---|---|
-| Developer Portal | http://localhost:3000 |
-| Admin Portal | http://localhost:3001 |
-| Gateway Runtime | http://localhost:8080 |
-| RabbitMQ Management | http://localhost:15672 |
+### 3. Access the platform
+
+| Service | URL | Description |
+|---|---|---|
+| Developer Portal | http://localhost:3000 | API catalog, subscriptions, billing, docs |
+| Admin Portal | http://localhost:3001 | API management, analytics, monetization |
+| Gateway Runtime | http://localhost:8080 | API proxy endpoint |
+| RabbitMQ Management | http://localhost:15672 | Message broker UI (guest/guest) |
+
+### 4. Default login credentials
+
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@gateway.local` | `changeme` |
+
+### 5. Stop all services
+
+```bash
+docker compose down        # Stop containers (keep data)
+docker compose down -v     # Stop containers and delete all data
+```
+
+### 6. Enable ClickHouse (optional — for high-throughput mode)
+
+For deployments targeting 50K+ requests/second, enable ClickHouse as the analytics backend:
+
+1. Edit `deploy/docker/.env` — uncomment the ClickHouse section and update the Spring profile:
+
+```properties
+# Change this line:
+SPRING_PROFILES_ACTIVE=dev,clickhouse
+
+# Uncomment these:
+CLICKHOUSE_HOST=clickhouse
+CLICKHOUSE_PORT=8123
+CLICKHOUSE_HTTP_PORT=8123
+CLICKHOUSE_NATIVE_PORT=9000
+CLICKHOUSE_DB=gateway_analytics
+CLICKHOUSE_USER=default
+CLICKHOUSE_PASSWORD=
+```
+
+2. Start with the ClickHouse profile:
+
+```bash
+docker compose --profile clickhouse up -d
+```
+
+This starts everything from the standard setup plus a ClickHouse container. The analytics service automatically routes request log writes and reads to ClickHouse instead of PostgreSQL.
+
+### Migrating existing data
+
+**Local PostgreSQL to Docker:**
+```bash
+./scripts/migrate-to-docker.sh
+```
+
+**PostgreSQL request_logs to ClickHouse:**
+```bash
+./scripts/migrate-to-clickhouse.sh
+```
 
 ---
 
-## Development Setup
+## Development Setup (without Docker)
+
+For contributors who want to run services individually outside Docker.
 
 ### Prerequisites
 
@@ -225,30 +277,140 @@ npm run dev:admin    # Admin portal on :3001
 
 ## Configuration
 
-All services are configured through environment variables. The table below lists the primary variables used across services.
+All services are configured through environment variables. When running with Docker, a pre-configured `.env` file is included — **no configuration needed**, just run `docker compose up -d`.
+
+| Variable | Docker Default | Local Dev Default | Description |
+|---|---|---|---|
+| `GATEWAY_ENV` | `dev` | `dev` | Environment profile (`dev`, `staging`, `prod`) |
+| `DB_HOST` | `postgres` | `localhost` | PostgreSQL host |
+| `DB_PORT` | `5432` | `5432` | PostgreSQL port |
+| `DB_NAME` | `gateway` | `gateway` | PostgreSQL database name |
+| `DB_USERNAME` | `postgres` | `postgres` | PostgreSQL username |
+| `DB_PASSWORD` | `postgres` | `postgres` | PostgreSQL password |
+| `RABBITMQ_HOST` | `rabbitmq` | `localhost` | RabbitMQ host |
+| `RABBITMQ_PORT` | `5672` | `5672` | RabbitMQ AMQP port |
+| `RABBITMQ_USERNAME` | `guest` | `guest` | RabbitMQ username |
+| `RABBITMQ_PASSWORD` | `guest` | `guest` | RabbitMQ password |
+| `RABBITMQ_VHOST` | `/cem` | `/cem` | RabbitMQ virtual host |
+| `JWT_ISSUER_URI` | `http://identity-service:8081` | `http://localhost:8081` | JWT token issuer URI |
+| `IDENTITY_SERVICE_URL` | `http://identity-service:8081` | `http://localhost:8081` | Internal URL for identity service |
+| `MAIL_HOST` | `localhost` | `localhost` | SMTP server host |
+| `MAIL_PORT` | `1025` | `1025` | SMTP server port |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8082` | `http://localhost:8082` | Management API URL (browser) |
+| `NEXT_PUBLIC_IDENTITY_URL` | `http://localhost:8081` | `http://localhost:8081` | Identity service URL (browser) |
+| `NEXT_PUBLIC_GATEWAY_URL` | `http://localhost:8080` | `http://localhost:8080` | Gateway runtime URL (browser) |
+| `NEXT_PUBLIC_ANALYTICS_URL` | `http://localhost:8083` | `http://localhost:8083` | Analytics service URL (browser) |
+
+**ClickHouse (optional — high-throughput mode):**
 
 | Variable | Default | Description |
 |---|---|---|
-| `GATEWAY_ENV` | `dev` | Environment profile (`dev`, `staging`, `prod`) |
-| `DB_HOST` | `localhost` | PostgreSQL host |
-| `DB_PORT` | `5432` | PostgreSQL port |
-| `DB_NAME` | `gateway` | PostgreSQL database name |
-| `DB_USERNAME` | `gateway` | PostgreSQL username |
-| `DB_PASSWORD` | `gateway` | PostgreSQL password |
-| `RABBITMQ_HOST` | `localhost` | RabbitMQ host |
-| `RABBITMQ_PORT` | `5672` | RabbitMQ AMQP port |
-| `RABBITMQ_USERNAME` | `guest` | RabbitMQ username |
-| `RABBITMQ_PASSWORD` | `guest` | RabbitMQ password |
-| `RABBITMQ_VHOST` | `/cem` | RabbitMQ virtual host |
-| `JWT_ISSUER_URI` | `http://localhost:8081` | JWT token issuer URI |
-| `SMTP_HOST` | `mailhog` | SMTP server host |
-| `SMTP_PORT` | `1025` | SMTP server port |
-| `IDENTITY_SERVICE_URL` | `http://localhost:8081` | Internal URL for the identity service |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8082` | Management API URL (frontend) |
-| `NEXT_PUBLIC_IDENTITY_URL` | `http://localhost:8081` | Identity service URL (frontend) |
-| `NEXT_PUBLIC_GATEWAY_URL` | `http://localhost:8080` | Gateway runtime URL (frontend) |
+| `CLICKHOUSE_HOST` | `clickhouse` | ClickHouse server host |
+| `CLICKHOUSE_PORT` | `8123` | ClickHouse HTTP port |
+| `CLICKHOUSE_NATIVE_PORT` | `9000` | ClickHouse native TCP port |
+| `CLICKHOUSE_DB` | `gateway_analytics` | ClickHouse database name |
+| `CLICKHOUSE_USER` | `default` | ClickHouse username |
+| `CLICKHOUSE_PASSWORD` | *(empty)* | ClickHouse password |
+
+> **Note:** `NEXT_PUBLIC_*` variables are accessed from the browser, so they use `localhost` even in Docker. Internal service-to-service URLs use Docker container names (`postgres`, `rabbitmq`, `identity-service`). ClickHouse variables are only needed when running with `--profile clickhouse`.
 
 Database schemas (`identity`, `gateway`, `analytics`, `notification`) are created automatically via the init script and managed with **Liquibase** migrations.
+
+---
+
+## Deployment Modes
+
+Waterwall supports two deployment modes depending on your throughput requirements.
+
+### Standard Mode (PostgreSQL only)
+
+Best for most deployments handling up to **~5,000 requests/second**. All request logs, analytics, and metrics are stored in PostgreSQL.
+
+```bash
+cd deploy/docker
+docker compose up -d
+```
+
+This starts PostgreSQL, RabbitMQ, all 5 backend services, and both frontend portals. Zero additional configuration needed.
+
+### High-Throughput Mode (PostgreSQL + ClickHouse)
+
+For deployments targeting **10,000 - 50,000+ requests/second**, Waterwall supports [ClickHouse](https://clickhouse.com/) as an optional analytics backend.
+
+#### Why ClickHouse?
+
+At high request volumes, writing every API request log to PostgreSQL becomes a bottleneck:
+
+| Challenge | PostgreSQL | ClickHouse |
+|---|---|---|
+| **Write throughput** | ~5K-10K inserts/sec | 500K+ inserts/sec |
+| **Storage efficiency** | Row-based, large on disk | Columnar, 10-20x compression |
+| **Aggregation queries** | Slows down on 100M+ rows | Sub-second on billions of rows |
+| **Data retention** | Expensive DELETE operations | Built-in TTL auto-expiry |
+| **Resource contention** | Analytics writes compete with API management reads | Dedicated engine, no contention |
+
+#### What moves to ClickHouse
+
+Only the high-volume analytics data moves to ClickHouse. Everything else stays in PostgreSQL:
+
+| Data | Store | Reason |
+|---|---|---|
+| `request_logs` (every API request) | **ClickHouse** | High-volume writes, time-series queries |
+| `metrics_1m`, `metrics_1h`, `metrics_1d` | **ClickHouse** | Aggregated rollups, large scans |
+| Real-time dashboards, SSE streaming | **ClickHouse** | Fast aggregation over recent data |
+| Custom report builder queries | **ClickHouse** | Ad-hoc analytics on large datasets |
+| API definitions, routes, plans | PostgreSQL | Relational data, low volume |
+| Users, roles, sessions, API keys | PostgreSQL | Transactional, relational |
+| SLA configs, alert rules | PostgreSQL | Configuration data, JPA entities |
+| Subscriptions, billing, invoices | PostgreSQL | Transactional integrity |
+| Notification templates, delivery logs | PostgreSQL | Low volume, relational |
+
+#### Enabling ClickHouse
+
+1. Uncomment the ClickHouse variables in your `.env` file:
+
+```properties
+SPRING_PROFILES_ACTIVE=dev,clickhouse
+CLICKHOUSE_HOST=clickhouse
+CLICKHOUSE_PORT=8123
+CLICKHOUSE_DB=gateway_analytics
+```
+
+2. Start with the ClickHouse profile:
+
+```bash
+cd deploy/docker
+docker compose --profile clickhouse up -d
+```
+
+This starts everything from Standard Mode plus a ClickHouse container. The analytics-service automatically detects the `clickhouse` Spring profile and routes request log writes and reads to ClickHouse instead of PostgreSQL.
+
+#### How the switch works
+
+The analytics-service uses a **strategy pattern** with Spring profiles — no code changes needed to switch:
+
+```
+                     RequestLogStore (interface)
+                      /                    \
+   @Profile("!clickhouse")          @Profile("clickhouse")
+   PostgresRequestLogStore          ClickHouseRequestLogStore
+   (default — uses PostgreSQL)      (uses ClickHouse JDBC)
+```
+
+- **No ClickHouse profile** (default): Spring injects `PostgresRequestLogStore`. All SQL uses PostgreSQL syntax. Identical behavior to previous versions.
+- **With ClickHouse profile**: Spring injects `ClickHouseRequestLogStore`. SQL is translated to ClickHouse-native syntax (`countIf()`, `quantile()`, `toStartOfHour()`, etc.).
+
+All other services (identity, management, notification, gateway-runtime) are completely unaffected — they always use PostgreSQL.
+
+#### Migrating existing data to ClickHouse
+
+If you're switching an existing deployment from Standard to High-Throughput mode:
+
+```bash
+./scripts/migrate-to-clickhouse.sh
+```
+
+This exports `request_logs` and metrics tables from PostgreSQL and imports them into ClickHouse.
 
 ---
 

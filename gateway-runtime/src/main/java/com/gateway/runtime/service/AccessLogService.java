@@ -72,12 +72,14 @@ public class AccessLogService {
         MatchedRoute matchedRoute = (MatchedRoute) request.getAttribute("gateway.matchedRoute");
         String apiId = null;
         String routeId = null;
+        String apiName = null;
         String authType = null;
         if (matchedRoute != null) {
             apiId = matchedRoute.getRoute().getApiId() != null
                     ? matchedRoute.getRoute().getApiId().toString() : null;
             routeId = matchedRoute.getRoute().getRouteId() != null
                     ? matchedRoute.getRoute().getRouteId().toString() : null;
+            apiName = matchedRoute.getRoute().getApiName();
             if (matchedRoute.getRoute().getAuthTypes() != null && !matchedRoute.getRoute().getAuthTypes().isEmpty()) {
                 authType = String.join(",", matchedRoute.getRoute().getAuthTypes());
             }
@@ -143,6 +145,7 @@ public class AccessLogService {
                 .spanId(spanId)
                 .apiId(apiId)
                 .routeId(routeId)
+                .apiName(apiName)
                 .consumerId(consumerId)
                 .applicationId(applicationId)
                 .method(request.getMethod())
@@ -181,6 +184,7 @@ public class AccessLogService {
         private String spanId;
         private String apiId;
         private String routeId;
+        private String apiName;
         private String consumerId;
         private String applicationId;
         private String method;

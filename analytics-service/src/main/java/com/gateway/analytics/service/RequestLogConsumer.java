@@ -28,6 +28,7 @@ import java.util.UUID;
 public class RequestLogConsumer {
 
     private final RequestLogRepository requestLogRepository;
+    private final com.gateway.analytics.store.RequestLogStore requestLogStore;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -48,6 +49,8 @@ public class RequestLogConsumer {
                     .routeId(uuidOrNull(json, "routeId"))
                     .consumerId(uuidOrNull(json, "consumerId"))
                     .applicationId(uuidOrNull(json, "applicationId"))
+                    .apiName(textOrNull(json, "apiName"))
+                    .consumerEmail(textOrNull(json, "consumerEmail"))
                     .method(textOrNull(json, "method"))
                     .path(textOrNull(json, "path"))
                     .statusCode(json.path("statusCode").asInt(0))
@@ -62,7 +65,7 @@ public class RequestLogConsumer {
                     .mockMode(json.path("mockMode").asBoolean(false))
                     .build();
 
-            requestLogRepository.save(entity);
+            requestLogStore.save(entity);
 
             log.info("Persisted request log: trace={} {} {} -> {}",
                     entity.getTraceId(), entity.getMethod(),

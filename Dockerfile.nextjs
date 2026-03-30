@@ -1,0 +1,50 @@
+##############################################
+# Stage 1: Install dependencies (cached)
+##############################################
+FROM node:20-alpine AS deps
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY packages/shared-ui/package.json packages/shared-ui/
+
+ARG APP_NAME
+COPY ${APP_NAME}/package.json ${APP_NAME}/
+
+RUN npm ci --workspace=packages/shared-ui --workspace=${APP_NAME} --include-workspace-root 2>/dev/null || npm install
+
+##############################################
+# Stage 2: Build the app
+##############################################
+FROM deps AS build
+ARG APP_NAME
+
+# Copy shared-ui source
+COPY packages/shared-ui/ packages/shared-ui/
+
+# Copy app source
+COPY ${APP_NAME}/ ${APP_NAME}/
+
+WORKDIR /app/${APP_NAME}
+RUN npm run build
+
+##############################################
+# Stage 3: Production runtime
+##############################################
+FROM node:20-alpine AS runtime
+ARG APP_NAME
+ARG PORT=3000
+
+RUN addgroup -S gateway && adduser -S gateway -G gateway
+WORKDIR /app
+
+# Copy standalone output
+COPY --from=build /app/${APP_NAME}/.next/standalone ./
+COPY --from=build /app/${APP_NAME}/.next/static ${APP_NAME}/.next/static
+COPY --from=build /app/${APP_NAME}/public ${APP_NAME}/public/
+
+USER gateway
+ENV PORT=${PORT}
+ENV HOSTNAME=0.0.0.0
+EXPOSE ${PORT}
+
+CMD ["node", "server.js"]

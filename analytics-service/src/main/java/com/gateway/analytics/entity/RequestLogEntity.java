@@ -42,6 +42,12 @@ public class RequestLogEntity {
     @Column(name = "application_id")
     private UUID applicationId;
 
+    @Column(name = "api_name")
+    private String apiName;
+
+    @Column(name = "consumer_email")
+    private String consumerEmail;
+
     @Column(name = "method", length = 10)
     private String method;
 

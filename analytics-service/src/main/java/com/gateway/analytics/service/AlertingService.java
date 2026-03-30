@@ -7,13 +7,13 @@ import com.gateway.analytics.entity.AlertHistoryEntity;
 import com.gateway.analytics.entity.AlertRuleEntity;
 import com.gateway.analytics.repository.AlertHistoryRepository;
 import com.gateway.analytics.repository.AlertRuleRepository;
+import com.gateway.analytics.store.RequestLogStore;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,7 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -35,7 +34,7 @@ public class AlertingService {
 
     private final AlertRuleRepository alertRuleRepository;
     private final AlertHistoryRepository alertHistoryRepository;
-    private final JdbcTemplate jdbcTemplate;
+    private final RequestLogStore requestLogStore;
 
     // ── Scheduled Evaluation ─────────────────────────────────────────────
 
@@ -83,59 +82,7 @@ public class AlertingService {
     }
 
     private BigDecimal queryMetric(String metric, int windowMinutes, UUID apiId) {
-        String interval = windowMinutes + " minutes";
-        String apiFilter = apiId != null ? " AND api_id = '" + apiId + "'" : "";
-
-        String sql = switch (metric.toLowerCase()) {
-            case "error_rate" -> """
-                SELECT COALESCE(
-                    COUNT(*) FILTER (WHERE status_code >= 400) * 100.0 / NULLIF(COUNT(*), 0),
-                    0
-                ) AS value
-                FROM analytics.request_logs
-                WHERE created_at >= NOW() - INTERVAL '%s' AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(interval, apiFilter);
-
-            case "avg_latency" -> """
-                SELECT COALESCE(AVG(latency_ms), 0) AS value
-                FROM analytics.request_logs
-                WHERE created_at >= NOW() - INTERVAL '%s' AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(interval, apiFilter);
-
-            case "request_count", "requests_per_min" -> """
-                SELECT COUNT(*) AS value
-                FROM analytics.request_logs
-                WHERE created_at >= NOW() - INTERVAL '%s' AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(interval, apiFilter);
-
-            case "p99_latency", "latency_p99" -> """
-                SELECT COALESCE(
-                    PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY latency_ms),
-                    0
-                ) AS value
-                FROM analytics.request_logs
-                WHERE created_at >= NOW() - INTERVAL '%s' AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(interval, apiFilter);
-
-            default -> {
-                log.warn("Unknown metric: {}", metric);
-                yield null;
-            }
-        };
-
-        if (sql == null) return null;
-
-        try {
-            Map<String, Object> result = jdbcTemplate.queryForMap(sql);
-            Object value = result.get("value");
-            if (value instanceof Number number) {
-                return BigDecimal.valueOf(number.doubleValue());
-            }
-            return null;
-        } catch (Exception e) {
-            log.debug("Failed to query metric {}: {}", metric, e.getMessage());
-            return null;
-        }
+        return requestLogStore.queryMetric(metric, windowMinutes, apiId);
     }
 
     private boolean evaluateCondition(BigDecimal value, String condition, BigDecimal threshold) {

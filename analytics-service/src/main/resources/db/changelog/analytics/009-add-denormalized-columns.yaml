@@ -1,0 +1,23 @@
+databaseChangeLog:
+  - changeSet:
+      id: analytics-009-add-denormalized-columns
+      author: gateway-team
+      comment: "Add denormalized api_name and consumer_email for ClickHouse compatibility"
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - columnExists:
+                schemaName: analytics
+                tableName: request_logs
+                columnName: api_name
+      changes:
+        - addColumn:
+            schemaName: analytics
+            tableName: request_logs
+            columns:
+              - column:
+                  name: api_name
+                  type: varchar(255)
+              - column:
+                  name: consumer_email
+                  type: varchar(255)

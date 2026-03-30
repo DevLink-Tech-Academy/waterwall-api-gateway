@@ -4,10 +4,10 @@ import com.gateway.analytics.dto.HealthDashboardResponse;
 import com.gateway.analytics.dto.HealthDashboardResponse.GatewayStats;
 import com.gateway.analytics.dto.HealthDashboardResponse.ServiceHealth;
 import com.gateway.analytics.dto.HealthDashboardResponse.TopError;
+import com.gateway.analytics.store.RequestLogStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -20,7 +20,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class HealthDashboardService {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final RequestLogStore store;
     private final RabbitTemplate rabbitTemplate;
 
     private static final List<ServiceDefinition> SERVICES = List.of(
@@ -93,19 +93,7 @@ public class HealthDashboardService {
      * Gateway stats from the last 1 minute of request_logs: RPS, error rate, avg latency.
      */
     public GatewayStats getGatewayStats() {
-        String sql = """
-            SELECT
-                COUNT(*) AS total,
-                COALESCE(
-                    COUNT(*) FILTER (WHERE status_code >= 400) * 100.0 / NULLIF(COUNT(*), 0),
-                    0
-                ) AS error_rate,
-                COALESCE(AVG(latency_ms), 0) AS avg_latency
-            FROM analytics.request_logs
-            WHERE created_at >= NOW() - INTERVAL '1 minute'
-            """;
-
-        Map<String, Object> row = jdbcTemplate.queryForMap(sql);
+        Map<String, Object> row = store.getGatewayStats();
         long total = ((Number) row.get("total")).longValue();
         double errorRate = ((Number) row.get("error_rate")).doubleValue();
         double avgLatency = ((Number) row.get("avg_latency")).doubleValue();
@@ -125,51 +113,19 @@ public class HealthDashboardService {
      */
     public Map<String, Double> getPercentiles(String range) {
         String interval = toInterval(range);
-
-        String sql = """
-            SELECT
-                PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY latency_ms) AS p50,
-                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY latency_ms) AS p75,
-                PERCENTILE_CONT(0.9)  WITHIN GROUP (ORDER BY latency_ms) AS p90,
-                PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95,
-                PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY latency_ms) AS p99
-            FROM analytics.request_logs
-            WHERE created_at >= NOW() - INTERVAL '%s'
-            """.formatted(interval);
-
-        Map<String, Object> row = jdbcTemplate.queryForMap(sql);
-
-        Map<String, Double> percentiles = new LinkedHashMap<>();
-        percentiles.put("p50", toDouble(row.get("p50")));
-        percentiles.put("p75", toDouble(row.get("p75")));
-        percentiles.put("p90", toDouble(row.get("p90")));
-        percentiles.put("p95", toDouble(row.get("p95")));
-        percentiles.put("p99", toDouble(row.get("p99")));
-        return percentiles;
+        return store.getPercentiles(interval);
     }
 
     /**
      * Top 10 error status codes in the last hour.
      */
     public List<TopError> getTopErrors() {
-        String sql = """
-            SELECT
-                status_code,
-                COUNT(*) AS cnt,
-                MAX(created_at) AS last_seen
-            FROM analytics.request_logs
-            WHERE status_code >= 400
-              AND created_at >= NOW() - INTERVAL '1 hour'
-            GROUP BY status_code
-            ORDER BY cnt DESC
-            LIMIT 10
-            """;
-
-        return jdbcTemplate.query(sql, (rs, rowNum) -> TopError.builder()
-                .statusCode(rs.getInt("status_code"))
-                .count(rs.getLong("cnt"))
-                .lastSeen(rs.getTimestamp("last_seen").toInstant())
-                .build());
+        List<Map<String, Object>> rows = store.getTopErrors();
+        return rows.stream().map(row -> TopError.builder()
+                .statusCode(((Number) row.get("status_code")).intValue())
+                .count(((Number) row.get("count")).longValue())
+                .lastSeen((Instant) row.get("last_seen"))
+                .build()).toList();
     }
 
     /**
@@ -205,10 +161,5 @@ public class HealthDashboardService {
             case "7d" -> "7 days";
             default -> "1 hour";
         };
-    }
-
-    private double toDouble(Object value) {
-        if (value == null) return 0.0;
-        return Math.round(((Number) value).doubleValue() * 100.0) / 100.0;
     }
 }

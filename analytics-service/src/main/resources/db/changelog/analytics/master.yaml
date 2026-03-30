@@ -14,4 +14,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/analytics/008-create-sla-tables.yaml
   - include:
+      file: db/changelog/analytics/009-add-denormalized-columns.yaml
+  - include:
       file: db/changelog/analytics/seed-001-sample-data.yaml

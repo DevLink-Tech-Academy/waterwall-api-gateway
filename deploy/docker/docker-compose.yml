@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ============ INFRASTRUCTURE ============
   postgres:
@@ -9,13 +7,13 @@ services:
       - "${DB_PORT:-5432}:5432"
     environment:
       POSTGRES_DB: ${DB_NAME:-gateway}
-      POSTGRES_USER: ${DB_USERNAME:-gateway}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-gateway}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./init-schemas.sql:/docker-entrypoint-initdb.d/01-init-schemas.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-gateway}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -44,186 +42,250 @@ services:
     networks:
       - gateway-network
 
+  # ============ OPTIONAL: CLICKHOUSE (high-throughput mode) ============
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: gateway-clickhouse
+    profiles: ["clickhouse"]
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-gateway_analytics}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - gateway-network
+
   # ============ BACKEND SERVICES ============
   identity-service:
     build:
-      context: ../../identity-service
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: Dockerfile.java
+      args:
+        SERVICE_NAME: identity-service
+        SERVICE_PORT: 8081
     container_name: gateway-identity
     ports:
       - "8081:8081"
     environment:
-      GATEWAY_ENV: ${GATEWAY_ENV:-dev}
+      SPRING_PROFILES_ACTIVE: ${GATEWAY_ENV:-dev}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-gateway}
-      DB_USERNAME: ${DB_USERNAME:-gateway}
-      DB_PASSWORD: ${DB_PASSWORD:-gateway}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
-      SMTP_HOST: ${SMTP_HOST:-mailhog}
-      SMTP_PORT: ${SMTP_PORT:-1025}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/cem}
+      MAIL_HOST: ${MAIL_HOST:-mailhog}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:8081/actuator/health/liveness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - gateway-network
+
+  management-api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.java
+      args:
+        SERVICE_NAME: management-api
+        SERVICE_PORT: 8082
+    container_name: gateway-management
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: ${GATEWAY_ENV:-dev}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-gateway}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/cem}
+      IDENTITY_SERVICE_URL: http://identity-service:8081
       JWT_ISSUER_URI: http://identity-service:8081
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health/liveness"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    networks:
-      - gateway-network
-
-  management-api:
-    build:
-      context: ../../management-api
-      dockerfile: Dockerfile
-    container_name: gateway-management
-    ports:
-      - "8082:8082"
-    environment:
-      GATEWAY_ENV: ${GATEWAY_ENV:-dev}
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-gateway}
-      DB_USERNAME: ${DB_USERNAME:-gateway}
-      DB_PASSWORD: ${DB_PASSWORD:-gateway}
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
-      IDENTITY_SERVICE_URL: http://identity-service:8081
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
       identity-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health/liveness"]
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:8082/actuator/health/liveness || exit 1"]
       interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 30s
-    networks:
-      - gateway-network
-
-  gateway-runtime:
-    build:
-      context: ../../gateway-runtime
-      dockerfile: Dockerfile
-    container_name: gateway-runtime
-    ports:
-      - "8080:8080"
-      - "9090:9090"
-    environment:
-      GATEWAY_ENV: ${GATEWAY_ENV:-dev}
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: ${DB_NAME:-gateway}
-      DB_USERNAME: ${DB_USERNAME:-gateway}
-      DB_PASSWORD: ${DB_PASSWORD:-gateway}
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
-      IDENTITY_SERVICE_URL: http://identity-service:8081
-      GRPC_PORT: 9090
-    depends_on:
-      identity-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health/liveness"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 60s
     networks:
       - gateway-network
 
   analytics-service:
     build:
-      context: ../../analytics-service
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: Dockerfile.java
+      args:
+        SERVICE_NAME: analytics-service
+        SERVICE_PORT: 8083
     container_name: gateway-analytics
     ports:
       - "8083:8083"
     environment:
-      GATEWAY_ENV: ${GATEWAY_ENV:-dev}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-gateway}
-      DB_USERNAME: ${DB_USERNAME:-gateway}
-      DB_PASSWORD: ${DB_PASSWORD:-gateway}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/cem}
+      JWT_ISSUER_URI: http://identity-service:8081
+      MAIL_HOST: ${MAIL_HOST:-mailhog}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      # ClickHouse (only when profile=clickhouse is active)
+      CLICKHOUSE_HOST: ${CLICKHOUSE_HOST:-clickhouse}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_PORT:-8123}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-gateway_analytics}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8083/actuator/health/liveness"]
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:8083/actuator/health/liveness || exit 1"]
       interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 60s
     networks:
       - gateway-network
 
   notification-service:
     build:
-      context: ../../notification-service
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: Dockerfile.java
+      args:
+        SERVICE_NAME: notification-service
+        SERVICE_PORT: 8084
     container_name: gateway-notification
     ports:
       - "8084:8084"
     environment:
-      GATEWAY_ENV: ${GATEWAY_ENV:-dev}
+      SPRING_PROFILES_ACTIVE: ${GATEWAY_ENV:-dev}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-gateway}
-      DB_USERNAME: ${DB_USERNAME:-gateway}
-      DB_PASSWORD: ${DB_PASSWORD:-gateway}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
-      SMTP_HOST: ${SMTP_HOST:-mailhog}
-      SMTP_PORT: ${SMTP_PORT:-1025}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/cem}
+      MAIL_HOST: ${MAIL_HOST:-mailhog}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
     depends_on:
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8084/actuator/health/liveness"]
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:8084/actuator/health/liveness || exit 1"]
       interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 60s
+    networks:
+      - gateway-network
+
+  gateway-runtime:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.java
+      args:
+        SERVICE_NAME: gateway-runtime
+        SERVICE_PORT: 8080
+    container_name: gateway-runtime
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      SPRING_PROFILES_ACTIVE: ${GATEWAY_ENV:-dev}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-gateway}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/cem}
+      IDENTITY_SERVICE_URL: http://identity-service:8081
+      JWT_ISSUER_URI: http://identity-service:8081
+    depends_on:
+      identity-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:8080/actuator/health/liveness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     networks:
       - gateway-network
 
   # ============ FRONTEND ============
   gateway-portal:
     build:
-      context: ../../gateway-portal
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: Dockerfile.nextjs
+      args:
+        APP_NAME: gateway-portal
+        PORT: 3000
     container_name: gateway-portal
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://management-api:8082
-      NEXT_PUBLIC_IDENTITY_URL: http://identity-service:8081
-      NEXT_PUBLIC_GATEWAY_URL: http://gateway-runtime:8080
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8082}
+      NEXT_PUBLIC_IDENTITY_URL: ${NEXT_PUBLIC_IDENTITY_URL:-http://localhost:8081}
+      NEXT_PUBLIC_GATEWAY_URL: ${NEXT_PUBLIC_GATEWAY_URL:-http://localhost:8080}
     depends_on:
       management-api:
         condition: service_healthy
@@ -232,14 +294,18 @@ services:
 
   gateway-admin:
     build:
-      context: ../../gateway-admin
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: Dockerfile.nextjs
+      args:
+        APP_NAME: gateway-admin
+        PORT: 3001
     container_name: gateway-admin
     ports:
       - "3001:3001"
     environment:
-      NEXT_PUBLIC_API_URL: http://management-api:8082
-      NEXT_PUBLIC_IDENTITY_URL: http://identity-service:8081
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8082}
+      NEXT_PUBLIC_IDENTITY_URL: ${NEXT_PUBLIC_IDENTITY_URL:-http://localhost:8081}
+      NEXT_PUBLIC_ANALYTICS_URL: ${NEXT_PUBLIC_ANALYTICS_URL:-http://localhost:8083}
       PORT: 3001
     depends_on:
       management-api:
@@ -250,6 +316,7 @@ services:
 volumes:
   postgres-data:
   rabbitmq-data:
+  clickhouse-data:
 
 networks:
   gateway-network:

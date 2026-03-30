@@ -1,17 +1,14 @@
 package com.gateway.analytics.controller;
 
 import com.gateway.analytics.dto.ReportQueryRequest;
+import com.gateway.analytics.store.RequestLogStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -21,7 +18,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ReportBuilderController {
 
-    private final NamedParameterJdbcTemplate namedJdbcTemplate;
+    private final RequestLogStore store;
 
     private static final Set<String> ALLOWED_METRICS = Set.of(
             "request_count", "avg_latency", "error_rate", "p99_latency"
@@ -36,8 +33,9 @@ public class ReportBuilderController {
             @RequestBody ReportQueryRequest request) {
         log.info("Custom report query: metrics={}, groupBy={}", request.getMetrics(), request.getGroupBy());
         validateRequest(request);
-        QueryResult qr = buildQuery(request);
-        List<Map<String, Object>> results = namedJdbcTemplate.queryForList(qr.sql, qr.params);
+        QueryComponents qc = buildQueryComponents(request);
+        List<Map<String, Object>> results = store.executeReportQuery(
+                qc.selectClauses, qc.groupByClauses, qc.whereClause, qc.params, 1000);
         return ResponseEntity.ok(results);
     }
 
@@ -55,8 +53,9 @@ public class ReportBuilderController {
                 dateFrom, dateTo, statusCodes, groupBy);
         validateRequest(request);
 
-        QueryResult qr = buildQuery(request);
-        List<Map<String, Object>> results = namedJdbcTemplate.queryForList(qr.sql, qr.params);
+        QueryComponents qc = buildQueryComponents(request);
+        List<Map<String, Object>> results = store.executeReportQuery(
+                qc.selectClauses, qc.groupByClauses, qc.whereClause, qc.params, 1000);
         String csv = toCsv(results);
 
         return ResponseEntity.ok()
@@ -67,13 +66,13 @@ public class ReportBuilderController {
 
     // ── Query Building ──────────────────────────────────────────────────
 
-    private QueryResult buildQuery(ReportQueryRequest request) {
-        MapSqlParameterSource params = new MapSqlParameterSource();
+    private QueryComponents buildQueryComponents(ReportQueryRequest request) {
+        List<Object> params = new ArrayList<>();
         List<String> selectClauses = new ArrayList<>();
         List<String> groupByClauses = new ArrayList<>();
         List<String> whereClauses = new ArrayList<>();
 
-        // Always start with the base table
+        // Always start with a base condition
         whereClauses.add("1=1");
 
         // Process groupBy columns
@@ -154,52 +153,35 @@ public class ReportBuilderController {
         Map<String, Object> filters = request.getFilters();
         if (filters != null) {
             if (filters.containsKey("apiId") && filters.get("apiId") != null) {
-                whereClauses.add("api_id = :apiId");
-                params.addValue("apiId", UUID.fromString(filters.get("apiId").toString()));
+                whereClauses.add("api_id = ?");
+                params.add(UUID.fromString(filters.get("apiId").toString()));
             }
             if (filters.containsKey("consumerId") && filters.get("consumerId") != null) {
-                whereClauses.add("consumer_id = :consumerId");
-                params.addValue("consumerId", UUID.fromString(filters.get("consumerId").toString()));
+                whereClauses.add("consumer_id = ?");
+                params.add(UUID.fromString(filters.get("consumerId").toString()));
             }
             if (filters.containsKey("dateFrom") && filters.get("dateFrom") != null) {
-                whereClauses.add("created_at >= :dateFrom::timestamp");
-                params.addValue("dateFrom", filters.get("dateFrom").toString());
+                whereClauses.add("created_at >= ?::timestamp");
+                params.add(filters.get("dateFrom").toString());
             }
             if (filters.containsKey("dateTo") && filters.get("dateTo") != null) {
-                whereClauses.add("created_at < (:dateTo::date + INTERVAL '1 day')");
-                params.addValue("dateTo", filters.get("dateTo").toString());
+                whereClauses.add("created_at < (?::date + INTERVAL '1 day')");
+                params.add(filters.get("dateTo").toString());
             }
             if (filters.containsKey("statusCodes") && filters.get("statusCodes") != null) {
                 @SuppressWarnings("unchecked")
                 List<Integer> codes = (List<Integer>) filters.get("statusCodes");
                 if (!codes.isEmpty()) {
-                    whereClauses.add("status_code IN (:statusCodes)");
-                    params.addValue("statusCodes", codes);
+                    String placeholders = String.join(",", codes.stream().map(c -> "?").toList());
+                    whereClauses.add("status_code IN (" + placeholders + ")");
+                    params.addAll(codes);
                 }
             }
         }
 
-        // Build SQL
-        StringBuilder sql = new StringBuilder("SELECT ");
-        sql.append(String.join(", ", selectClauses));
-        sql.append(" FROM analytics.request_logs WHERE ");
-        sql.append(String.join(" AND ", whereClauses));
-
-        if (!groupByClauses.isEmpty()) {
-            sql.append(" GROUP BY ").append(String.join(", ", groupByClauses));
-        }
-
-        // Default ordering
-        if (groupByClauses.isEmpty()) {
-            // No group by, just aggregate results
-        } else if (selectClauses.stream().anyMatch(s -> s.contains("request_count"))) {
-            sql.append(" ORDER BY request_count DESC");
-        }
-
-        sql.append(" LIMIT 1000");
-
-        log.debug("Generated report SQL: {}", sql);
-        return new QueryResult(sql.toString(), params);
+        String whereClause = String.join(" AND ", whereClauses);
+        log.debug("Built report query components: select={}, groupBy={}, where={}", selectClauses, groupByClauses, whereClause);
+        return new QueryComponents(selectClauses, groupByClauses, whereClause, params);
     }
 
     private void validateRequest(ReportQueryRequest request) {
@@ -273,5 +255,6 @@ public class ReportBuilderController {
         return csv.toString();
     }
 
-    private record QueryResult(String sql, MapSqlParameterSource params) {}
+    private record QueryComponents(List<String> selectClauses, List<String> groupByClauses,
+                                   String whereClause, List<Object> params) {}
 }
