@@ -240,40 +240,90 @@ For contributors who want to run services individually outside Docker.
 
 ### Prerequisites
 
-- **Java 21** (Eclipse Temurin or GraalVM recommended)
+- **Java 21** (Eclipse Temurin recommended)
 - **Maven 3.9+**
 - **Node.js 20+** and **npm 10+**
-- **PostgreSQL 16**
-- **RabbitMQ 3.13+**
+- **PostgreSQL 16** running on `localhost:5432`
+- **RabbitMQ 3.13+** running on `localhost:5672`
 
-### Backend
+### Step 1: Infrastructure
 
-Build all backend services from the project root:
-
-```bash
-./mvnw clean install
-```
-
-Run individual services:
+You can install PostgreSQL and RabbitMQ locally, or use Docker for just the infrastructure:
 
 ```bash
-# Identity Service
-./mvnw -pl identity-service spring-boot:run
-
-# Management API
-./mvnw -pl management-api spring-boot:run
-
-# Gateway Runtime
-./mvnw -pl gateway-runtime spring-boot:run
-
-# Analytics Service
-./mvnw -pl analytics-service spring-boot:run
-
-# Notification Service
-./mvnw -pl notification-service spring-boot:run
+cd deploy/docker
+docker compose up -d postgres rabbitmq
 ```
 
-### Frontend
+If running PostgreSQL locally (not via Docker), create the database and schemas:
+
+```sql
+CREATE DATABASE gateway;
+\c gateway
+CREATE SCHEMA IF NOT EXISTS identity;
+CREATE SCHEMA IF NOT EXISTS gateway;
+CREATE SCHEMA IF NOT EXISTS analytics;
+CREATE SCHEMA IF NOT EXISTS audit;
+CREATE SCHEMA IF NOT EXISTS notification;
+```
+
+If running RabbitMQ locally (not via Docker), create the virtual host:
+
+```bash
+rabbitmqctl add_vhost /cem
+rabbitmqctl set_permissions -p /cem guest ".*" ".*" ".*"
+```
+
+### Step 2: Build the backend
+
+From the project root:
+
+```bash
+mvn clean install -DskipTests
+```
+
+### Step 3: Start backend services
+
+Services must be started in order — identity-service first (other services depend on it).
+
+**Option A: Start all at once (Windows)**
+
+```cmd
+start-all.bat
+```
+
+**Option B: Start individually**
+
+Open a separate terminal for each service:
+
+```bash
+# 1. Identity Service (start first, wait for it to be ready)
+java -jar identity-service/target/identity-service-1.0.0-SNAPSHOT.jar
+
+# 2. Management API (needs identity-service and postgres)
+java -jar management-api/target/management-api-1.0.0-SNAPSHOT.jar
+
+# 3. Gateway Runtime
+java -jar gateway-runtime/target/gateway-runtime-1.0.0-SNAPSHOT.jar
+
+# 4. Analytics Service
+java -jar analytics-service/target/analytics-service-1.0.0-SNAPSHOT.jar
+
+# 5. Notification Service
+java -jar notification-service/target/notification-service-1.0.0-SNAPSHOT.jar
+```
+
+Wait ~30 seconds for all services to initialize. Verify with:
+
+```bash
+curl http://localhost:8081/actuator/health/liveness   # identity-service
+curl http://localhost:8082/actuator/health/liveness   # management-api
+curl http://localhost:8080/actuator/health/liveness   # gateway-runtime
+curl http://localhost:8083/actuator/health/liveness   # analytics-service
+curl http://localhost:8084/actuator/health/liveness   # notification-service
+```
+
+### Step 4: Start the frontends
 
 Install dependencies from the project root (npm workspaces):
 
@@ -281,12 +331,35 @@ Install dependencies from the project root (npm workspaces):
 npm install
 ```
 
-Run the portals in development mode:
+**Development mode** (hot reload):
 
 ```bash
-npm run dev:portal   # Developer portal on :3000
-npm run dev:admin    # Admin portal on :3001
+npm run dev:portal   # Developer portal on http://localhost:3000
+npm run dev:admin    # Admin portal on http://localhost:3001
 ```
+
+**Production mode** (build first, then serve):
+
+```bash
+npm run build:all
+cd gateway-portal && npx next start -p 3000 &
+cd gateway-admin && npx next start -p 3001 &
+```
+
+### Step 5: Access the platform
+
+| Service | URL |
+|---|---|
+| Developer Portal | http://localhost:3000 |
+| Admin Portal | http://localhost:3001 |
+| Gateway Runtime | http://localhost:8080 |
+| Identity Service | http://localhost:8081 |
+| Management API | http://localhost:8082 |
+| Analytics Service | http://localhost:8083 |
+| Notification Service | http://localhost:8084 |
+| RabbitMQ Management | http://localhost:15672 (guest/guest) |
+
+Log in with the credentials from the [Default login credentials](#4-default-login-credentials) section above.
 
 ---
 
