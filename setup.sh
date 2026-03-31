@@ -75,14 +75,57 @@ detect_os() {
 detect_os
 step "Detected OS: $OS"
 
+# Fix broken apt repos early (before any installs)
+if [[ "$OS" == "debian" ]]; then
+  fix_apt_repos
+fi
+
 # -----------------------------------------------
 # 2. Install missing prerequisites
 # -----------------------------------------------
 step "Checking and installing prerequisites"
 
+# Fix broken apt repos before any install — disable repos with GPG/label errors
+fix_apt_repos() {
+  if [[ "$OS" != "debian" ]]; then return 0; fi
+
+  # Run apt-get update and collect broken repo files
+  local broken_repos
+  broken_repos=$(sudo apt-get update 2>&1 | grep -oP "https?://[^ ]+" | sort -u || true)
+  local error_output
+  error_output=$(sudo apt-get update 2>&1 || true)
+
+  # Disable source files that reference broken repos
+  if echo "$error_output" | grep -qE "^(E|W):.*signature|^E:.*changed its"; then
+    warn "Found broken apt repositories — disabling them temporarily..."
+    for list_file in /etc/apt/sources.list.d/*.list; do
+      [[ -f "$list_file" ]] || continue
+      if echo "$error_output" | grep -qF "$(head -1 "$list_file" | grep -oP 'https?://[^/ ]+' || true)"; then
+        sudo mv "$list_file" "${list_file}.disabled" 2>/dev/null && \
+          warn "  Disabled: $(basename "$list_file")"
+      fi
+    done
+    # Also handle .sources files (DEB822 format)
+    for src_file in /etc/apt/sources.list.d/*.sources; do
+      [[ -f "$src_file" ]] || continue
+      local uri
+      uri=$(grep -oP '(?<=URIs: )https?://[^ ]+' "$src_file" 2>/dev/null | head -1 || true)
+      if [[ -n "$uri" ]] && echo "$error_output" | grep -qF "$uri"; then
+        sudo mv "$src_file" "${src_file}.disabled" 2>/dev/null && \
+          warn "  Disabled: $(basename "$src_file")"
+      fi
+    done
+    sudo apt-get update -qq 2>/dev/null || true
+  fi
+}
+
+apt_install() {
+  sudo apt-get install -y -qq "$@" 2>/dev/null
+}
+
 install_git() {
   case "$OS" in
-    debian)  sudo apt-get update -qq && sudo apt-get install -y -qq git ;;
+    debian)  apt_install git ;;
     fedora)  sudo dnf install -y -q git ;;
     centos)  sudo yum install -y -q git ;;
     arch)    sudo pacman -S --noconfirm git ;;
@@ -238,14 +281,19 @@ install_node_binary() {
 install_docker() {
   case "$OS" in
     debian)
-      sudo apt-get update -qq
-      sudo apt-get install -y -qq ca-certificates curl
+      apt_install ca-certificates curl gnupg || true
       sudo install -m 0755 -d /etc/apt/keyrings
-      sudo curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg -o /etc/apt/keyrings/docker.asc
+      local DISTRO_ID
+      DISTRO_ID=$(. /etc/os-release && echo "$ID")
+      local CODENAME
+      CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+      sudo curl -fsSL "https://download.docker.com/linux/${DISTRO_ID}/gpg" -o /etc/apt/keyrings/docker.asc
       sudo chmod a+r /etc/apt/keyrings/docker.asc
-      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-      sudo apt-get update -qq
-      sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${DISTRO_ID} ${CODENAME} stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+      sudo apt-get update -qq 2>/dev/null || true
+      apt_install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+      sudo systemctl start docker 2>/dev/null || true
+      sudo systemctl enable docker 2>/dev/null || true
       sudo usermod -aG docker "$USER" 2>/dev/null || true
       ;;
     fedora)
