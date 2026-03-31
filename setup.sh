@@ -75,23 +75,14 @@ detect_os() {
 detect_os
 step "Detected OS: $OS"
 
-# Fix broken apt repos early (before any installs)
-if [[ "$OS" == "debian" ]]; then
-  fix_apt_repos
-fi
-
 # -----------------------------------------------
 # 2. Install missing prerequisites
 # -----------------------------------------------
-step "Checking and installing prerequisites"
 
 # Fix broken apt repos before any install — disable repos with GPG/label errors
 fix_apt_repos() {
   if [[ "$OS" != "debian" ]]; then return 0; fi
 
-  # Run apt-get update and collect broken repo files
-  local broken_repos
-  broken_repos=$(sudo apt-get update 2>&1 | grep -oP "https?://[^ ]+" | sort -u || true)
   local error_output
   error_output=$(sudo apt-get update 2>&1 || true)
 
@@ -105,7 +96,6 @@ fix_apt_repos() {
           warn "  Disabled: $(basename "$list_file")"
       fi
     done
-    # Also handle .sources files (DEB822 format)
     for src_file in /etc/apt/sources.list.d/*.sources; do
       [[ -f "$src_file" ]] || continue
       local uri
@@ -122,6 +112,13 @@ fix_apt_repos() {
 apt_install() {
   sudo apt-get install -y -qq "$@" 2>/dev/null
 }
+
+step "Checking and installing prerequisites"
+
+# Fix broken apt repos early (before any installs)
+if [[ "$OS" == "debian" ]]; then
+  fix_apt_repos
+fi
 
 install_git() {
   case "$OS" in
