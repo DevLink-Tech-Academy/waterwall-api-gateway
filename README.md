@@ -150,6 +150,13 @@ Or from an existing clone:
 ./setup.sh --no-clone
 ```
 
+After the initial setup, use `start.sh` to start the platform on subsequent runs:
+
+```bash
+./start.sh              # start everything
+./start.sh --build      # rebuild backend first, then start
+```
+
 The script will:
 
 1. Detect your OS (Ubuntu/Debian, Fedora, CentOS, Arch, macOS, Windows)

@@ -355,15 +355,26 @@ log "Docker Compose is available"
 
 # Verify Java version
 get_java_major() {
-  java -version 2>&1 | head -1 | awk -F'"' '{print $2}' | awk -F'.' '{if ($1 == "1") print $2; else print $1}'
+  local ver_line
+  ver_line=$(java -version 2>&1 | head -1)
+  # Extract version number between quotes, then get major version
+  local full_ver
+  full_ver=$(echo "$ver_line" | tr -d '\n' | sed 's/.*"\(.*\)".*/\1/')
+  local major
+  major=$(echo "$full_ver" | cut -d. -f1)
+  # Handle old 1.x format (e.g. "1.8.0")
+  if [[ "$major" == "1" ]]; then
+    major=$(echo "$full_ver" | cut -d. -f2)
+  fi
+  echo "$major"
 }
 JAVA_VER=$(get_java_major)
-if [[ -z "$JAVA_VER" ]] || [[ "$JAVA_VER" -lt 21 ]]; then
+if [[ -z "$JAVA_VER" ]] || ! [[ "$JAVA_VER" =~ ^[0-9]+$ ]] || [[ "$JAVA_VER" -lt 21 ]]; then
   warn "Java ${JAVA_VER:-unknown} found but 21+ required — installing Java 21..."
   install_java
   hash -r 2>/dev/null || true
   JAVA_VER=$(get_java_major)
-  [[ -n "$JAVA_VER" && "$JAVA_VER" -ge 21 ]] || err "Java 21+ required (found ${JAVA_VER:-unknown})"
+  [[ -n "$JAVA_VER" && "$JAVA_VER" =~ ^[0-9]+$ && "$JAVA_VER" -ge 21 ]] || err "Java 21+ required (found ${JAVA_VER:-unknown})"
 fi
 
 log "All prerequisites met"
