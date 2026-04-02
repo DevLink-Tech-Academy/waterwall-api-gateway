@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 @Slf4j
 @Component
-@Order(51)
+@Order(42)
 public class QuotaEnforcementFilter implements Filter {
 
     private final ObjectMapper objectMapper;

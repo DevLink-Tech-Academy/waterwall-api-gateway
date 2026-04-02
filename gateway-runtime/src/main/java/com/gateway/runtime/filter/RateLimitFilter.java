@@ -9,8 +9,6 @@ import com.gateway.runtime.model.GatewayPlan;
 import com.gateway.runtime.model.MatchedRoute;
 import com.gateway.runtime.service.StrictRateLimitService;
 import com.gateway.runtime.service.TokenBucketRateLimiter;
-import com.gateway.runtime.service.TokenBucketRateLimiter.ConsumeResult;
-import com.gateway.runtime.service.TokenBucketRateLimiter.Window;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -28,7 +26,6 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -47,7 +44,7 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-@Order(50)
+@Order(41)
 public class RateLimitFilter implements Filter {
 
     private final RateLimitCounter rateLimitCounter;
@@ -56,6 +53,13 @@ public class RateLimitFilter implements Filter {
     private final TokenBucketRateLimiter tokenBucketRateLimiter;
     private final ObjectMapper objectMapper;
     private final String nodeId;
+
+    /**
+     * In-memory fixed-window counters for SOFT rate limiting.
+     * Key format: {@code appId:apiId:window:epochWindow} → atomic counter.
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger> WINDOW_COUNTERS =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public RateLimitFilter(RateLimitCounter rateLimitCounter,
                            EventPublisher eventPublisher,
@@ -79,8 +83,8 @@ public class RateLimitFilter implements Filter {
 
         GatewayPlan plan = (GatewayPlan) request.getAttribute(SubscriptionCheckFilter.ATTR_PLAN);
 
-        // If no plan or no rate limit configured at all, pass through
-        if (plan == null || !hasAnyRateLimit(plan)) {
+        // If no plan, NONE enforcement, or no rate limit configured, pass through
+        if (plan == null || "NONE".equals(plan.getEnforcement()) || !hasAnyRateLimit(plan)) {
             filterChain.doFilter(servletRequest, servletResponse);
             return;
         }
@@ -136,34 +140,59 @@ public class RateLimitFilter implements Filter {
     }
 
     /**
-     * SOFT enforcement: token bucket algorithm supporting multiple time windows
-     * (per-second, per-minute, per-day) with burst allowance from the plan.
-     * All configured windows are checked; the request is denied if any window is exhausted.
-     * Response headers reflect the most restrictive window.
+     * SOFT enforcement: in-memory fixed-window counters for per-second, per-minute,
+     * and per-day windows. Each window uses an atomic counter keyed by
+     * {@code appId:apiId:window:epochWindow}. The request is denied if any window
+     * exceeds its limit.
      */
     private void handleSoftMode(HttpServletRequest request, HttpServletResponse response,
                                 FilterChain filterChain, GatewayPlan plan,
                                 String appId, String apiId) throws IOException, ServletException {
 
-        Map<Window, Integer> windows = buildWindowMap(plan);
+        long nowSeconds = System.currentTimeMillis() / 1000;
 
-        if (windows.isEmpty()) {
-            filterChain.doFilter(request, response);
-            return;
+        // Check each configured window — deny if any is exceeded
+        if (plan.getRequestsPerSecond() != null && plan.getRequestsPerSecond() > 0) {
+            int limit = plan.getRequestsPerSecond();
+            String key = appId + ":" + apiId + ":sec:" + nowSeconds;
+            int count = WINDOW_COUNTERS.computeIfAbsent(key, k -> new java.util.concurrent.atomic.AtomicInteger(0)).incrementAndGet();
+            if (count > limit) {
+                long resetEpoch = nowSeconds + 1;
+                setRateLimitHeaders(response, limit, 0, resetEpoch);
+                writeErrorResponse(response, request, limit, resetEpoch);
+                return;
+            }
         }
 
-        ConsumeResult result = tokenBucketRateLimiter.tryConsumeAllWindows(
-                appId, apiId, windows, plan.getBurstAllowance());
-
-        if (!result.allowed()) {
-            log.debug("Rate limit exceeded (SOFT/token-bucket): appId={}, apiId={}, limit={}",
-                    appId, apiId, result.limit());
-            setRateLimitHeaders(response, result.limit(), 0, result.resetEpochSeconds());
-            writeErrorResponse(response, request, result.limit(), result.resetEpochSeconds());
-            return;
+        if (plan.getRequestsPerMinute() != null && plan.getRequestsPerMinute() > 0) {
+            int limit = plan.getRequestsPerMinute();
+            long minuteWindow = nowSeconds / 60;
+            String key = appId + ":" + apiId + ":min:" + minuteWindow;
+            int count = WINDOW_COUNTERS.computeIfAbsent(key, k -> new java.util.concurrent.atomic.AtomicInteger(0)).incrementAndGet();
+            if (count > limit) {
+                long resetEpoch = (minuteWindow + 1) * 60;
+                setRateLimitHeaders(response, limit, 0, resetEpoch);
+                writeErrorResponse(response, request, limit, resetEpoch);
+                return;
+            }
+            // Set headers from the most restrictive window
+            int remaining = Math.max(0, limit - count);
+            long resetEpoch = (minuteWindow + 1) * 60;
+            setRateLimitHeaders(response, limit, remaining, resetEpoch);
         }
 
-        setRateLimitHeaders(response, result.limit(), result.remaining(), result.resetEpochSeconds());
+        if (plan.getRequestsPerDay() != null && plan.getRequestsPerDay() > 0) {
+            int limit = plan.getRequestsPerDay();
+            long dayWindow = nowSeconds / 86400;
+            String key = appId + ":" + apiId + ":day:" + dayWindow;
+            int count = WINDOW_COUNTERS.computeIfAbsent(key, k -> new java.util.concurrent.atomic.AtomicInteger(0)).incrementAndGet();
+            if (count > limit) {
+                long resetEpoch = (dayWindow + 1) * 86400;
+                setRateLimitHeaders(response, limit, 0, resetEpoch);
+                writeErrorResponse(response, request, limit, resetEpoch);
+                return;
+            }
+        }
 
         // Async broadcast for cross-node awareness (best-effort, non-blocking)
         try {
@@ -180,22 +209,6 @@ public class RateLimitFilter implements Filter {
      * Builds the map of active rate-limit windows from the plan configuration.
      * Only windows with a positive limit are included.
      */
-    private Map<Window, Integer> buildWindowMap(GatewayPlan plan) {
-        Map<Window, Integer> windows = new LinkedHashMap<>();
-
-        if (plan.getRequestsPerSecond() != null && plan.getRequestsPerSecond() > 0) {
-            windows.put(Window.PER_SECOND, plan.getRequestsPerSecond());
-        }
-        if (plan.getRequestsPerMinute() != null && plan.getRequestsPerMinute() > 0) {
-            windows.put(Window.PER_MINUTE, plan.getRequestsPerMinute());
-        }
-        if (plan.getRequestsPerDay() != null && plan.getRequestsPerDay() > 0) {
-            windows.put(Window.PER_DAY, plan.getRequestsPerDay());
-        }
-
-        return windows;
-    }
-
     /**
      * Returns true if the plan has at least one rate limit configured.
      */
@@ -238,6 +251,39 @@ public class RateLimitFilter implements Filter {
             return InetAddress.getLocalHost().getHostName();
         } catch (UnknownHostException e) {
             return "unknown-" + ProcessHandle.current().pid();
+        }
+    }
+
+    /**
+     * Cleanup expired window counters every 60 seconds.
+     * Removes entries for windows that have already passed.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 60_000)
+    public void cleanupExpiredWindows() {
+        long nowSeconds = System.currentTimeMillis() / 1000;
+        long currentMinute = nowSeconds / 60;
+        long currentDay = nowSeconds / 86400;
+
+        int removed = 0;
+        var it = WINDOW_COUNTERS.keySet().iterator();
+        while (it.hasNext()) {
+            String key = it.next();
+            // Parse window epoch from key format: appId:apiId:window:epochWindow
+            String[] parts = key.split(":");
+            if (parts.length < 4) { it.remove(); removed++; continue; }
+            String windowType = parts[parts.length - 2];
+            long windowEpoch = Long.parseLong(parts[parts.length - 1]);
+
+            boolean expired = switch (windowType) {
+                case "sec" -> windowEpoch < nowSeconds - 2;
+                case "min" -> windowEpoch < currentMinute - 1;
+                case "day" -> windowEpoch < currentDay - 1;
+                default -> true;
+            };
+            if (expired) { it.remove(); removed++; }
+        }
+        if (removed > 0) {
+            log.debug("Rate limit window cleanup: removed {} expired entries, {} remaining", removed, WINDOW_COUNTERS.size());
         }
     }
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { DataTable, StatusBadge, FormModal, get, post } from '@gateway/shared-ui';
+import { DataTable, StatusBadge, FormModal, get, post, put } from '@gateway/shared-ui';
 import type { Column, Pagination } from '@gateway/shared-ui';
 
 /* ------------------------------------------------------------------ */
@@ -137,6 +137,7 @@ export default function PlansPage() {
 
   /* Modal state */
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
   const [form, setForm] = useState<PlanFormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -166,32 +167,58 @@ export default function PlansPage() {
 
   useEffect(() => { fetchPlans(); }, [fetchPlans]);
 
-  /* ---- Create plan ---- */
-  const handleCreate = useCallback(async () => {
+  /* ---- Create / Update plan ---- */
+  const handleSave = useCallback(async () => {
     if (!form.name.trim()) return;
     setSaving(true);
     try {
       const num = (v: string) => (v ? Number(v) : undefined);
-      await post('/v1/plans', {
+      const rateLimits: Record<string, number | undefined> = {};
+      if (form.requestsPerSecond) rateLimits.requestsPerSecond = num(form.requestsPerSecond);
+      if (form.requestsPerMinute) rateLimits.requestsPerMinute = num(form.requestsPerMinute);
+      if (form.requestsPerDay) rateLimits.requestsPerDay = num(form.requestsPerDay);
+      if (form.burstAllowance) rateLimits.burstAllowance = num(form.burstAllowance);
+      const payload = {
         name: form.name.trim(),
         description: form.description.trim() || undefined,
-        requestsPerSecond: num(form.requestsPerSecond),
-        requestsPerMinute: num(form.requestsPerMinute),
-        requestsPerDay: num(form.requestsPerDay),
-        burstAllowance: num(form.burstAllowance),
-        maxRequestsPerMonth: num(form.maxRequestsPerMonth),
+        rateLimits: Object.keys(rateLimits).length > 0 ? rateLimits : undefined,
+        quota: form.maxRequestsPerMonth ? { maxRequestsPerMonth: num(form.maxRequestsPerMonth) } : undefined,
         enforcement: form.enforcement,
-      });
+      };
+      if (editingPlan) {
+        await put(`/v1/plans/${editingPlan.id}`, payload);
+        showToast('Plan updated successfully');
+      } else {
+        await post('/v1/plans', payload);
+        showToast('Plan created successfully');
+      }
       setModalOpen(false);
       setForm(emptyForm);
+      setEditingPlan(null);
       fetchPlans();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to create plan';
+      const msg = err instanceof Error ? err.message : 'Failed to save plan';
       showToast(msg, 'error');
     } finally {
       setSaving(false);
     }
-  }, [form, fetchPlans]);
+  }, [form, editingPlan, fetchPlans]);
+
+  /* ---- Open edit modal ---- */
+  const openEdit = useCallback((plan: Plan) => {
+    setEditingPlan(plan);
+    setForm({
+      name: plan.name,
+      description: plan.description ?? '',
+      requestsPerSecond: plan.requestsPerSecond?.toString() ?? '',
+      requestsPerMinute: plan.requestsPerMinute?.toString() ?? '',
+      requestsPerDay: plan.requestsPerDay?.toString() ?? '',
+      burstAllowance: plan.burstAllowance?.toString() ?? '',
+      maxRequestsPerMonth: plan.maxRequestsPerMonth?.toString() ?? '',
+      enforcement: plan.enforcement ?? 'SOFT',
+    });
+    setModalOpen(true);
+  }, []);
 
   /* ---- Columns ---- */
   const columns: Column<Plan>[] = useMemo(() => [
@@ -241,7 +268,22 @@ export default function PlansPage() {
       label: 'Status',
       render: (p) => <StatusBadge status={p.status} size="sm" />,
     },
-  ], []);
+    {
+      key: 'actions' as keyof Plan,
+      label: '',
+      render: (p) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); openEdit(p); }}
+          className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 transition"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+          Edit
+        </button>
+      ),
+    },
+  ], [openEdit]);
 
   const pagination: Pagination = {
     page,
@@ -253,7 +295,7 @@ export default function PlansPage() {
   const set = (key: keyof PlanFormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
 
-  const openModal = () => { setForm(emptyForm); setModalOpen(true); };
+  const openModal = () => { setEditingPlan(null); setForm(emptyForm); setModalOpen(true); };
 
   const inputCls =
     'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30';
@@ -310,10 +352,10 @@ export default function PlansPage() {
       {/* ---- Create Plan Modal ---- */}
       <FormModal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title="Create Plan"
-        onSubmit={handleCreate}
-        submitLabel="Create"
+        onClose={() => { setModalOpen(false); setEditingPlan(null); }}
+        title={editingPlan ? 'Edit Plan' : 'Create Plan'}
+        onSubmit={handleSave}
+        submitLabel={editingPlan ? 'Update' : 'Create'}
         loading={saving}
       >
         <div className="space-y-5">
