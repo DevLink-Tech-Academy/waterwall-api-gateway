@@ -190,12 +190,26 @@ export default function ApiDetailPage() {
   const handleTryIt = async () => {
     const route = routes[trySelectedRoute];
     if (!route) return;
+    const isSoap = api?.protocolType === 'SOAP';
+
+    if (isSoap && !tryBody.trim()) {
+      setTryError('SOAP requests require an XML body. Click "Insert SOAP envelope" to get a template.');
+      return;
+    }
+
     setTryLoading(true);
     setTryError('');
     setTryResponse(null);
 
     const url = `${GATEWAY_URL}${route.path}`;
-    const hdrs: Record<string, string> = { 'Content-Type': 'application/json', 'X-Mock-Mode': 'true' };
+    const hdrs: Record<string, string> = {
+      'Content-Type': isSoap ? 'text/xml; charset=utf-8' : 'application/json',
+    };
+    if (isSoap && tryBody.trim()) {
+      // Extract SOAPAction from body if present
+      const actionMatch = tryBody.match(/SOAPAction:\s*"?([^"\n]+)"?/i);
+      if (actionMatch) hdrs['SOAPAction'] = actionMatch[1].trim();
+    }
     const hasValidApiKey = tryApiKey && tryApiKey !== 'enter-key';
     if (hasValidApiKey) hdrs['X-API-Key'] = tryApiKey;
     const token = getToken();
@@ -212,7 +226,7 @@ export default function ApiDetailPage() {
     const start = Date.now();
     try {
       const fetchOpts: RequestInit = { method: route.method, headers: hdrs };
-      if (['POST', 'PUT', 'PATCH'].includes(route.method) && tryBody.trim()) {
+      if (isSoap || (['POST', 'PUT', 'PATCH'].includes(route.method) && tryBody.trim())) {
         fetchOpts.body = tryBody;
       }
       const res = await fetch(url, fetchOpts);
@@ -221,7 +235,8 @@ export default function ApiDetailPage() {
       res.headers.forEach((v, k) => { respHeaders[k] = v; });
       let body = '';
       try { body = await res.text(); } catch { body = ''; }
-      try { body = JSON.stringify(JSON.parse(body), null, 2); } catch { /* not JSON */ }
+      // Format JSON responses; leave XML as-is (already readable)
+      try { body = JSON.stringify(JSON.parse(body), null, 2); } catch { /* not JSON — keep as text/XML */ }
       setTryResponse({ status: res.status, statusText: res.statusText, headers: respHeaders, body, latency });
     } catch (err) {
       setTryError(err instanceof Error ? err.message : 'Request failed');
@@ -357,19 +372,29 @@ export default function ApiDetailPage() {
     }
   };
 
-  // Load Swagger UI when API Docs tab is selected
+  // Load API spec when API Docs tab is selected
   const [specJson, setSpecJson] = useState<object | null>(null);
+  const [specRaw, setSpecRaw] = useState<string | null>(null);
   const [specError, setSpecError] = useState('');
+
+  const isOpenApiProtocol = !api?.protocolType || ['REST', 'OPENAPI_3', 'SWAGGER_2'].includes(api.protocolType);
 
   useEffect(() => {
     if (activeTab !== 'api-docs' || !id) return;
     // Fetch spec with auth
     fetch(`${API_BASE}/v1/governance/specs/${id}/openapi`, { headers: authHeaders() })
-      .then((r) => {
+      .then(async (r) => {
         if (!r.ok) throw new Error(`Failed to load spec (${r.status})`);
-        return r.json();
+        const text = await r.text();
+        // Try JSON parse for OpenAPI/Swagger specs
+        try {
+          const json = JSON.parse(text);
+          setSpecJson(json);
+        } catch {
+          // Not JSON — store as raw text (WSDL, GraphQL SDL, Protobuf, etc.)
+          setSpecRaw(text);
+        }
       })
-      .then((data) => setSpecJson(data))
       .catch((err) => setSpecError(err instanceof Error ? err.message : 'Failed to load API spec'));
   }, [activeTab, id]);
 
@@ -457,6 +482,7 @@ export default function ApiDetailPage() {
     { id: 'overview', label: 'Overview' },
     { id: 'endpoints', label: 'Endpoints', count: routes.length },
     { id: 'api-docs', label: 'API Docs' },
+    { id: 'try-it', label: 'Try It' },
     { id: 'sdks', label: 'SDKs' },
     { id: 'subscribe', label: 'Subscribe' },
   ];
@@ -868,15 +894,74 @@ export default function ApiDetailPage() {
               )}
             </div>
 
-            {/* Request Body (for POST/PUT/PATCH) */}
-            {routes[trySelectedRoute] && ['POST', 'PUT', 'PATCH'].includes(routes[trySelectedRoute].method) && (
+            {/* Request Body */}
+            {routes[trySelectedRoute] && (api?.protocolType === 'SOAP' || ['POST', 'PUT', 'PATCH'].includes(routes[trySelectedRoute].method)) && (
               <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>Request Body (JSON)</label>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+                  Request Body ({api?.protocolType === 'SOAP' ? 'SOAP XML' : 'JSON'})
+                </label>
+                {api?.protocolType === 'SOAP' && !tryBody.trim() && (() => {
+                  const selectedRoute = routes[trySelectedRoute];
+                  const opName = selectedRoute?.path?.replace(/^\//, '') || 'YourOperation';
+                  // Extract namespace from WSDL
+                  const nsMatch = specRaw?.match(/targetNamespace="([^"]+)"/);
+                  const ns = nsMatch ? nsMatch[1] : 'http://example.com/webservice';
+                  // Extract parameter elements for this operation from WSDL
+                  // Handles any namespace prefix: <s:element>, <xs:element>, <xsd:element>, etc.
+                  let params = '      <!-- Edit parameters below -->\n      <web:param>value</web:param>';
+                  if (specRaw) {
+                    // Match the operation's element block (any namespace prefix)
+                    const opRegex = new RegExp(
+                      `<\\w*:?element\\s+name="${opName}"[^>]*>[\\s\\S]*?</\\w*:?element>`,
+                      'i'
+                    );
+                    const opBlock = specRaw.match(opRegex);
+                    if (opBlock) {
+                      // Find child elements with name and type attributes
+                      const paramMatches = Array.from(
+                        opBlock[0].matchAll(/<\w*:?element\s+name="([^"]+)"\s+type="([^"]+)"/gi)
+                      );
+                      if (paramMatches.length > 0) {
+                        params = paramMatches
+                          .map(m => {
+                            const pName = m[1];
+                            const pType = m[2].split(':').pop() || '';
+                            const isNumeric = ['unsignedlong', 'decimal', 'int', 'integer', 'long', 'double', 'float', 'short'].includes(pType.toLowerCase());
+                            return `      <web:${pName}>${isNumeric ? '42' : 'value'}</web:${pName}>`;
+                          })
+                          .join('\n');
+                      }
+                    }
+                  }
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setTryBody(
+`<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:web="${ns}">
+  <soap:Body>
+    <web:${opName}>
+${params}
+    </web:${opName}>
+  </soap:Body>
+</soap:Envelope>`)}
+                      style={{
+                        marginBottom: 8, padding: '4px 10px', fontSize: 12, color: '#3b82f6',
+                        border: '1px solid #bfdbfe', borderRadius: 4, backgroundColor: '#eff6ff', cursor: 'pointer',
+                      }}
+                    >
+                      Insert SOAP envelope for {opName}
+                    </button>
+                  );
+                })()}
                 <textarea
                   value={tryBody}
                   onChange={(e) => setTryBody(e.target.value)}
-                  placeholder='{"key": "value"}'
-                  rows={5}
+                  placeholder={api?.protocolType === 'SOAP'
+                    ? '<?xml version="1.0" encoding="UTF-8"?>\n<soapenv:Envelope ...>'
+                    : '{"key": "value"}'}
+                  rows={api?.protocolType === 'SOAP' ? 10 : 5}
                   style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, fontFamily: 'monospace', resize: 'vertical', outline: 'none', boxSizing: 'border-box' }}
                 />
               </div>
@@ -934,6 +1019,20 @@ export default function ApiDetailPage() {
 
             {tryResponse && (
               <div>
+                {/* Subscription required hint */}
+                {tryResponse.status === 403 && tryResponse.body.includes('SUBSCRIPTION_REQUIRED') && (
+                  <div style={{ padding: '12px 16px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, marginBottom: 16, fontSize: 13 }}>
+                    <strong style={{ color: '#92400e' }}>Subscription required.</strong>
+                    <span style={{ color: '#78716c' }}> Your application needs an active subscription to this API. </span>
+                    <button
+                      onClick={() => setActiveTab('subscribe')}
+                      style={{ color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 13, textDecoration: 'underline' }}
+                    >
+                      Go to Subscribe tab
+                    </button>
+                  </div>
+                )}
+
                 {/* Status line */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
                   <span style={{
@@ -986,9 +1085,69 @@ export default function ApiDetailPage() {
         <div>
           {specError ? (
             <div style={{ backgroundColor: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', padding: 48, textAlign: 'center' }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>{'\u{1F4C4}'}</div>
               <p style={{ fontSize: 14, color: '#dc2626', marginBottom: 8 }}>{specError}</p>
-              <p style={{ fontSize: 13, color: '#94a3b8' }}>The OpenAPI spec for this API could not be loaded.</p>
+              <p style={{ fontSize: 13, color: '#94a3b8' }}>The API spec for this API could not be loaded.</p>
+            </div>
+          ) : specRaw && !specJson ? (
+            /* Non-JSON spec (WSDL, GraphQL SDL, Protobuf, etc.) — render as formatted code */
+            <div style={{
+              backgroundColor: '#fff', borderRadius: 10, border: '1px solid #e2e8f0',
+              padding: '24px', minHeight: 400,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <h3 style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', margin: 0 }}>
+                    {api?.protocolType === 'SOAP' ? 'WSDL Definition' :
+                     api?.protocolType === 'GRAPHQL' ? 'GraphQL Schema' :
+                     api?.protocolType === 'GRPC' ? 'Protocol Buffer Definition' :
+                     `${api?.protocolType || 'API'} Specification`}
+                  </h3>
+                  <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>Protocol: {api?.protocolType || 'Unknown'}</p>
+                </div>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(specRaw); }}
+                  style={{
+                    padding: '6px 14px', fontSize: 13, fontWeight: 500,
+                    border: '1px solid #e2e8f0', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: '#f8fafc', color: '#475569',
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+
+              {/* Extract and display WSDL operations */}
+              {api?.protocolType === 'SOAP' && (() => {
+                const ops = Array.from(specRaw.matchAll(/<(?:\w+:)?operation\s+name="([^"]+)"/g))
+                  .map(m => m[1])
+                  .filter((v, i, a) => a.indexOf(v) === i);
+                return ops.length > 0 ? (
+                  <div style={{ marginBottom: 20, padding: 16, backgroundColor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8 }}>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, color: '#0369a1', margin: '0 0 10px' }}>
+                      SOAP Operations ({ops.length})
+                    </h4>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {ops.map(op => (
+                        <span key={op} style={{
+                          padding: '4px 12px', backgroundColor: '#fff', border: '1px solid #7dd3fc',
+                          borderRadius: 6, fontSize: 13, fontFamily: 'monospace', color: '#0c4a6e',
+                        }}>
+                          {op}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null;
+              })()}
+
+              <pre style={{
+                backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8,
+                padding: 20, overflow: 'auto', maxHeight: 700, fontSize: 13,
+                lineHeight: 1.6, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                color: '#334155', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}>
+                {specRaw}
+              </pre>
             </div>
           ) : (
             <div style={{
@@ -996,7 +1155,7 @@ export default function ApiDetailPage() {
               padding: '16px 24px', minHeight: 400,
             }}>
               <div ref={swaggerRef} />
-              {!specJson && (
+              {!specJson && !specRaw && (
                 <div style={{ textAlign: 'center', padding: 48, color: '#94a3b8' }}>
                   Loading API documentation...
                 </div>
@@ -1328,11 +1487,12 @@ function SdkTab({ apiId, apiName }: { apiId: string; apiName: string }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${apiName.replace(/\s+/g, '-').toLowerCase()}-openapi.json`;
+      const ext = protocolType === 'SOAP' ? '.wsdl' : protocolType === 'GRAPHQL' ? '.graphql' : protocolType === 'GRPC' ? '.proto' : '.json';
+      a.download = `${apiName.replace(/\s+/g, '-').toLowerCase()}-spec${ext}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      setError('OpenAPI spec not available for this API');
+      setError('API spec not available for this API');
     }
   };
 
@@ -1449,7 +1609,7 @@ function SdkTab({ apiId, apiName }: { apiId: string; apiName: string }) {
       <div style={cardStyle}>
         <h3 style={{ fontSize: 16, fontWeight: 600, color: '#0f172a', margin: '0 0 6px' }}>OpenAPI Specification</h3>
         <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 16px' }}>
-          Download the raw OpenAPI spec to use with any code generator or import into tools like Swagger Editor
+          Download the raw API spec to use with code generators or import into tools like Swagger Editor or SoapUI
         </p>
         <button
           onClick={handleDownloadSpec}

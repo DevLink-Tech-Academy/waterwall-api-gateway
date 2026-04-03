@@ -2,6 +2,7 @@ databaseChangeLog:
   - changeSet:
       id: seed-001-sample-apis-environments-plans
       author: gateway-team
+      validCheckSum: ANY
       context: dev,uat
       comment: "Seed sample APIs, environments, plans, routes, subscriptions, and policy attachments"
       changes:
@@ -76,8 +77,20 @@ databaseChangeLog:
                 (gen_random_uuid(), '60000000-0000-0000-0000-000000000005', '/v1/analytics/reports', 'GET',    'http://analytics-backend:8094/reports',       '["OAUTH2"]',           10, true, true, now())
               ON CONFLICT DO NOTHING;
 
-
-       
+              -- ============================================================
+              -- SUBSCRIPTIONS (apps subscribed to APIs via plans)
+              -- ============================================================
+              INSERT INTO gateway.subscriptions (id, application_id, api_id, plan_id, status, environment_slug, approved_at, created_at)
+              VALUES
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000004', 'ACTIVE',   'dev', now(), now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000002', '60000000-0000-0000-0000-000000000004', '50000000-0000-0000-0000-000000000002', 'ACTIVE',   'dev', now(), now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000003', '60000000-0000-0000-0000-000000000002', '50000000-0000-0000-0000-000000000003', 'ACTIVE',   'dev', now(), now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000004', '60000000-0000-0000-0000-000000000005', '50000000-0000-0000-0000-000000000003', 'ACTIVE',   'dev', now(), now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000005', '60000000-0000-0000-0000-000000000003', '50000000-0000-0000-0000-000000000003', 'ACTIVE',   'dev', now(), now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000006', '60000000-0000-0000-0000-000000000004', '50000000-0000-0000-0000-000000000001', 'ACTIVE',   'dev', now(), now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000006', '60000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000001', 'PENDING',  'dev', now(), now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000002', '50000000-0000-0000-0000-000000000004', 'ACTIVE',   'dev', now(), now())
+              ON CONFLICT (application_id, api_id, environment_slug) DO NOTHING;
 
               -- ============================================================
               -- API DEPLOYMENTS

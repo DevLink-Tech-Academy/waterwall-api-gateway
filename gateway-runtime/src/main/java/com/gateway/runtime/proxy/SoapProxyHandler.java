@@ -35,6 +35,12 @@ public class SoapProxyHandler implements ProtocolProxyHandler {
             "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"
     );
 
+    private static final Set<String> CORS_HEADERS = Set.of(
+            "access-control-allow-origin", "access-control-allow-methods",
+            "access-control-allow-headers", "access-control-allow-credentials",
+            "access-control-expose-headers", "access-control-max-age"
+    );
+
     private static final String SOAP_ACTION_HEADER = "SOAPAction";
 
     private final RestClient restClient;
@@ -99,7 +105,8 @@ public class SoapProxyHandler implements ProtocolProxyHandler {
             // Build response, preserving XML content type
             HttpHeaders responseHeaders = new HttpHeaders();
             upstreamResponse.getHeaders().forEach((name, values) -> {
-                if (!HOP_BY_HOP_HEADERS.contains(name.toLowerCase())) {
+                String lower = name.toLowerCase();
+                if (!HOP_BY_HOP_HEADERS.contains(lower) && !CORS_HEADERS.contains(lower)) {
                     responseHeaders.put(name, values);
                 }
             });

@@ -1,0 +1,44 @@
+databaseChangeLog:
+  - changeSet:
+      id: seed-006-fix-sample-data
+      author: gateway-team
+      context: dev,uat
+      comment: "Fix sample data: BCrypt passwords (Argon2 params mismatch) and add environment_slug to seeded API keys"
+      changes:
+        - sql:
+            sql: |
+              -- Fix passwords: replace Argon2 hashes (wrong parameters) with BCrypt
+              -- Password for all sample users: password123
+              UPDATE identity.users
+              SET password_hash = '{bcrypt}$2b$12$qu3IQwr2tZqKJ2vWXXQHrOiWQiDkhYlCrn22XmgCoFfXYCza3OesS'
+              WHERE email IN (
+                'alice@acme-corp.com',
+                'bob@acme-corp.com',
+                'carol@globex.io',
+                'dave@globex.io',
+                'eve@initech.dev',
+                'frank@initech.dev',
+                'grace@example.com',
+                'heidi@example.com'
+              )
+              AND password_hash LIKE '{argon2id}%';
+
+              -- Fix API keys: set environment_slug where missing (required NOT NULL after migration 016)
+              UPDATE identity.api_keys
+              SET environment_slug = 'dev'
+              WHERE environment_slug IS NULL;
+      rollback:
+        - sql:
+            sql: |
+              UPDATE identity.users
+              SET password_hash = '{argon2id}$argon2id$v=19$m=16384,t=2,p=1$Y2hhbmdlbWVzYWx0$kR8RQwSB3J5FhGvHkGPYMg'
+              WHERE email IN (
+                'alice@acme-corp.com',
+                'bob@acme-corp.com',
+                'carol@globex.io',
+                'dave@globex.io',
+                'eve@initech.dev',
+                'frank@initech.dev',
+                'grace@example.com',
+                'heidi@example.com'
+              );

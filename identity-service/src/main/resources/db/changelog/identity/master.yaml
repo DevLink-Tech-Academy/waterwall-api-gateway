@@ -41,3 +41,5 @@ databaseChangeLog:
       file: db/changelog/identity/seed-004-fix-admin-password.yaml
   - include:
       file: db/changelog/identity/seed-005-sample-data.yaml
+  - include:
+      file: db/changelog/identity/seed-006-fix-sample-data.yaml

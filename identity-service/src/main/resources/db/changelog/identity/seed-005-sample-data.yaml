@@ -2,6 +2,7 @@ databaseChangeLog:
   - changeSet:
       id: seed-005-sample-data
       author: gateway-team
+      validCheckSum: ANY
       context: dev,uat
       comment: "Seed sample organizations, users, applications, and API keys for development"
       changes:
@@ -18,18 +19,18 @@ databaseChangeLog:
               ON CONFLICT DO NOTHING;
 
               -- ============================================================
-              -- USERS (password for all: "password123" — BCrypt hash)
+              -- USERS (password for all: "password123" — Argon2 hash)
               -- ============================================================
               INSERT INTO identity.users (id, email, password_hash, status, email_verified, password_changed_at, created_at, updated_at)
               VALUES
-                ('20000000-0000-0000-0000-000000000001', 'alice@acme-corp.com',    '{bcrypt}$2b$12$qu3IQwr2tZqKJ2vWXXQHrOiWQiDkhYlCrn22XmgCoFfXYCza3OesS', 'ACTIVE', true,  now(), now(), now()),
-                ('20000000-0000-0000-0000-000000000002', 'bob@acme-corp.com',      '{bcrypt}$2b$12$qu3IQwr2tZqKJ2vWXXQHrOiWQiDkhYlCrn22XmgCoFfXYCza3OesS', 'ACTIVE', true,  now(), now(), now()),
-                ('20000000-0000-0000-0000-000000000003', 'carol@globex.io',        '{bcrypt}$2b$12$qu3IQwr2tZqKJ2vWXXQHrOiWQiDkhYlCrn22XmgCoFfXYCza3OesS', 'ACTIVE', true,  now(), now(), now()),
-                ('20000000-0000-0000-0000-000000000004', 'dave@globex.io',         '{bcrypt}$2b$12$qu3IQwr2tZqKJ2vWXXQHrOiWQiDkhYlCrn22XmgCoFfXYCza3OesS', 'ACTIVE', true,  now(), now(), now()),
-                ('20000000-0000-0000-0000-000000000005', 'eve@initech.dev',        '{bcrypt}$2b$12$qu3IQwr2tZqKJ2vWXXQHrOiWQiDkhYlCrn22XmgCoFfXYCza3OesS', 'ACTIVE', true,  now(), now(), now()),
-                ('20000000-0000-0000-0000-000000000006', 'frank@initech.dev',      '{bcrypt}$2b$12$qu3IQwr2tZqKJ2vWXXQHrOiWQiDkhYlCrn22XmgCoFfXYCza3OesS', 'ACTIVE', false, now(), now(), now()),
-                ('20000000-0000-0000-0000-000000000007', 'grace@example.com',      '{bcrypt}$2b$12$qu3IQwr2tZqKJ2vWXXQHrOiWQiDkhYlCrn22XmgCoFfXYCza3OesS', 'PENDING_VERIFICATION', false, now(), now(), now()),
-                ('20000000-0000-0000-0000-000000000008', 'heidi@example.com',      '{bcrypt}$2b$12$qu3IQwr2tZqKJ2vWXXQHrOiWQiDkhYlCrn22XmgCoFfXYCza3OesS', 'ACTIVE', true,  now(), now(), now())
+                ('20000000-0000-0000-0000-000000000001', 'alice@acme-corp.com',    '{argon2id}$argon2id$v=19$m=16384,t=2,p=1$Y2hhbmdlbWVzYWx0$kR8RQwSB3J5FhGvHkGPYMg', 'ACTIVE', true,  now(), now(), now()),
+                ('20000000-0000-0000-0000-000000000002', 'bob@acme-corp.com',      '{argon2id}$argon2id$v=19$m=16384,t=2,p=1$Y2hhbmdlbWVzYWx0$kR8RQwSB3J5FhGvHkGPYMg', 'ACTIVE', true,  now(), now(), now()),
+                ('20000000-0000-0000-0000-000000000003', 'carol@globex.io',        '{argon2id}$argon2id$v=19$m=16384,t=2,p=1$Y2hhbmdlbWVzYWx0$kR8RQwSB3J5FhGvHkGPYMg', 'ACTIVE', true,  now(), now(), now()),
+                ('20000000-0000-0000-0000-000000000004', 'dave@globex.io',         '{argon2id}$argon2id$v=19$m=16384,t=2,p=1$Y2hhbmdlbWVzYWx0$kR8RQwSB3J5FhGvHkGPYMg', 'ACTIVE', true,  now(), now(), now()),
+                ('20000000-0000-0000-0000-000000000005', 'eve@initech.dev',        '{argon2id}$argon2id$v=19$m=16384,t=2,p=1$Y2hhbmdlbWVzYWx0$kR8RQwSB3J5FhGvHkGPYMg', 'ACTIVE', true,  now(), now(), now()),
+                ('20000000-0000-0000-0000-000000000006', 'frank@initech.dev',      '{argon2id}$argon2id$v=19$m=16384,t=2,p=1$Y2hhbmdlbWVzYWx0$kR8RQwSB3J5FhGvHkGPYMg', 'ACTIVE', false, now(), now(), now()),
+                ('20000000-0000-0000-0000-000000000007', 'grace@example.com',      '{argon2id}$argon2id$v=19$m=16384,t=2,p=1$Y2hhbmdlbWVzYWx0$kR8RQwSB3J5FhGvHkGPYMg', 'PENDING_VERIFICATION', false, now(), now(), now()),
+                ('20000000-0000-0000-0000-000000000008', 'heidi@example.com',      '{argon2id}$argon2id$v=19$m=16384,t=2,p=1$Y2hhbmdlbWVzYWx0$kR8RQwSB3J5FhGvHkGPYMg', 'ACTIVE', true,  now(), now(), now())
               ON CONFLICT (email) DO NOTHING;
 
               -- ============================================================
@@ -100,14 +101,14 @@ databaseChangeLog:
               -- ============================================================
               -- API KEYS  (key_hash is sha256 of the plaintext — not real, just for seed)
               -- ============================================================
-              INSERT INTO identity.api_keys (id, application_id, name, key_prefix, key_hash, status, environment_slug, created_at)
+              INSERT INTO identity.api_keys (id, application_id, name, key_prefix, key_hash, status, created_at)
               VALUES
-                (gen_random_uuid(), '30000000-0000-0000-0000-000000000001', 'Production Key',     'live_acme_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60001', 'ACTIVE', 'prod', now()),
-                (gen_random_uuid(), '30000000-0000-0000-0000-000000000002', 'Mobile Key',         'live_acme_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60002', 'ACTIVE', 'prod', now()),
-                (gen_random_uuid(), '30000000-0000-0000-0000-000000000003', 'Tracking Service',   'live_glbx_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60003', 'ACTIVE', 'prod', now()),
-                (gen_random_uuid(), '30000000-0000-0000-0000-000000000004', 'Analytics Key',      'live_glbx_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60004', 'ACTIVE', 'prod', now()),
-                (gen_random_uuid(), '30000000-0000-0000-0000-000000000005', 'ETL Pipeline Key',   'live_init_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60005', 'ACTIVE', 'prod', now()),
-                (gen_random_uuid(), '30000000-0000-0000-0000-000000000006', 'Dev Sandbox Key',    'test_dave_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60006', 'ACTIVE', 'dev', now())
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000001', 'Production Key',     'live_acme_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60001', 'ACTIVE', now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000002', 'Mobile Key',         'live_acme_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60002', 'ACTIVE', now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000003', 'Tracking Service',   'live_glbx_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60003', 'ACTIVE', now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000004', 'Analytics Key',      'live_glbx_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60004', 'ACTIVE', now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000005', 'ETL Pipeline Key',   'live_init_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60005', 'ACTIVE', now()),
+                (gen_random_uuid(), '30000000-0000-0000-0000-000000000006', 'Dev Sandbox Key',    'test_dave_', 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60006', 'ACTIVE', now())
               ON CONFLICT DO NOTHING;
 
       rollback:

@@ -42,6 +42,13 @@ public class RestProxyHandler implements ProtocolProxyHandler {
             "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"
     );
 
+    /** CORS headers managed by the gateway — strip from upstream responses to avoid duplicates */
+    private static final Set<String> CORS_HEADERS = Set.of(
+            "access-control-allow-origin", "access-control-allow-methods",
+            "access-control-allow-headers", "access-control-allow-credentials",
+            "access-control-expose-headers", "access-control-max-age"
+    );
+
     private final RestClient restClient;
     private final LoadBalancer loadBalancer;
     private final CircuitBreaker circuitBreaker;
@@ -157,7 +164,8 @@ public class RestProxyHandler implements ProtocolProxyHandler {
 
         HttpHeaders responseHeaders = new HttpHeaders();
         upstreamResponse.getHeaders().forEach((name, values) -> {
-            if (!HOP_BY_HOP_HEADERS.contains(name.toLowerCase())) {
+            String lower = name.toLowerCase();
+            if (!HOP_BY_HOP_HEADERS.contains(lower) && !CORS_HEADERS.contains(lower)) {
                 responseHeaders.put(name, values);
             }
         });
