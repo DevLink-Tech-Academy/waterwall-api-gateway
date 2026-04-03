@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { DataTable, StatusBadge, FormModal, get, post, put, del } from '@gateway/shared-ui';
 import type { Column } from '@gateway/shared-ui';
+import TransformationBuilder from '../../components/TransformationBuilder';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -53,7 +54,7 @@ interface SubscriptionItem {
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
 const AUTH_TYPES = ['API_KEY', 'JWT', 'OAUTH2', 'BASIC', 'NONE'] as const;
 
-type Tab = 'overview' | 'routes' | 'subscriptions' | 'deployments' | 'auth-policy' | 'gateway-config';
+type Tab = 'overview' | 'routes' | 'subscriptions' | 'deployments' | 'auth-policy' | 'policies' | 'gateway-config';
 
 interface AuthPolicy {
   authMode: 'ANY' | 'ALL';
@@ -160,7 +161,7 @@ export default function ApiDetailPage({ params }: { params: { id: string } }) {
   }, [id]);
 
   useEffect(() => {
-    if (tab !== 'routes') return;
+    if (tab !== 'routes' && tab !== 'policies') return;
     setRoutesLoading(true);
     get<Route[]>(`/v1/apis/${id}/routes`).then(setRoutes).catch(() => setRoutes([])).finally(() => setRoutesLoading(false));
   }, [tab, id]);
@@ -390,6 +391,7 @@ export default function ApiDetailPage({ params }: { params: { id: string } }) {
     { key: 'subscriptions', label: 'Subscriptions' },
     { key: 'deployments', label: 'Deployments' },
     { key: 'auth-policy', label: 'Authentication' },
+    { key: 'policies', label: 'Policies' },
     { key: 'gateway-config', label: 'Gateway Config' },
   ];
 
@@ -1113,6 +1115,9 @@ export default function ApiDetailPage({ params }: { params: { id: string } }) {
         </div>
       )}
 
+      {/* ── Policies ── */}
+      {tab === 'policies' && <PoliciesTab apiId={id} routes={routes} readOnly={retired} />}
+
       {/* ── Gateway Config ── */}
       {tab === 'gateway-config' && <GatewayConfigTab apiId={id} readOnly={retired} />}
     </div>
@@ -1338,6 +1343,485 @@ function DeploymentsTab({ apiId, apiName, readOnly = false }: { apiId: string; a
               })}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================== */
+/* Per-API Policies Tab                                                */
+/* ================================================================== */
+
+interface PolicyItem {
+  id: string;
+  name: string;
+  type: string;
+  description?: string;
+  config?: string;
+}
+
+interface PolicyAttachment {
+  id: string;
+  policyId: string;
+  policyName: string;
+  policyType: string;
+  apiId?: string;
+  apiName?: string;
+  routeId?: string;
+  routePath?: string;
+  scope: string;
+  priority: number;
+}
+
+function PoliciesTab({ apiId, routes, readOnly = false }: { apiId: string; routes: Route[]; readOnly?: boolean }) {
+  const [attachments, setAttachments] = useState<PolicyAttachment[]>([]);
+  const [allPolicies, setAllPolicies] = useState<PolicyItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  // Attach modal
+  const [showAttachModal, setShowAttachModal] = useState(false);
+  const [attachMode, setAttachMode] = useState<'existing' | 'new'>('existing');
+  const [attachForm, setAttachForm] = useState({ policyId: '', scope: 'API', routeId: '', priority: 0 });
+  const [newTransformForm, setNewTransformForm] = useState({ name: '', description: '', config: '{}', scope: 'API', routeId: '', priority: 0 });
+  const [attaching, setAttaching] = useState(false);
+
+  // View/edit mapping
+  const [viewingPolicy, setViewingPolicy] = useState<PolicyItem | null>(null);
+  const [editConfig, setEditConfig] = useState('{}');
+  const [saving, setSaving] = useState(false);
+
+  const policyTypeBadge = (type: string) => {
+    const styles: Record<string, string> = {
+      RATE_LIMIT: 'bg-amber-100 text-amber-800 ring-1 ring-amber-300',
+      AUTH: 'bg-blue-100 text-blue-800 ring-1 ring-blue-300',
+      TRANSFORM: 'bg-purple-100 text-purple-800 ring-1 ring-purple-300',
+      CACHE: 'bg-cyan-100 text-cyan-800 ring-1 ring-cyan-300',
+      CORS: 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300',
+      IP_FILTER: 'bg-red-100 text-red-800 ring-1 ring-red-300',
+    };
+    return styles[type?.toUpperCase()] || 'bg-gray-100 text-gray-800 ring-1 ring-gray-300';
+  };
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [attRes, polRes] = await Promise.all([
+        get<PolicyAttachment[]>(`/v1/policies/attachments/api/${apiId}`),
+        get<PolicyItem[]>('/v1/policies'),
+      ]);
+      setAttachments(attRes);
+      setAllPolicies(Array.isArray(polRes) ? polRes : []);
+    } catch {
+      setError('Failed to load policies');
+    } finally {
+      setLoading(false);
+    }
+  }, [apiId]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // Attach existing policy
+  const handleAttach = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAttaching(true);
+    setError('');
+    try {
+      await post('/v1/policies/attach', {
+        policyId: attachForm.policyId,
+        apiId,
+        routeId: attachForm.scope === 'ROUTE' && attachForm.routeId ? attachForm.routeId : null,
+        scope: attachForm.scope,
+        priority: attachForm.priority,
+      });
+      setShowAttachModal(false);
+      setAttachForm({ policyId: '', scope: 'API', routeId: '', priority: 0 });
+      loadData();
+    } catch {
+      setError('Failed to attach policy');
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  // Create new transform policy + attach in one step
+  const handleCreateAndAttach = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAttaching(true);
+    setError('');
+    try {
+      // 1. Create the policy
+      const created = await post<PolicyItem>('/v1/policies', {
+        name: newTransformForm.name,
+        type: 'TRANSFORM',
+        description: newTransformForm.description,
+        config: newTransformForm.config,
+      });
+      // 2. Attach it to this API
+      await post('/v1/policies/attach', {
+        policyId: created.id,
+        apiId,
+        routeId: newTransformForm.scope === 'ROUTE' && newTransformForm.routeId ? newTransformForm.routeId : null,
+        scope: newTransformForm.scope,
+        priority: newTransformForm.priority,
+      });
+      setShowAttachModal(false);
+      setNewTransformForm({ name: '', description: '', config: '{}', scope: 'API', routeId: '', priority: 0 });
+      loadData();
+    } catch {
+      setError('Failed to create and attach policy');
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  const handleDetach = async (attachmentId: string) => {
+    if (!confirm('Detach this policy?')) return;
+    try {
+      await del(`/v1/policies/attachments/${attachmentId}`);
+      loadData();
+    } catch {
+      setError('Failed to detach policy');
+    }
+  };
+
+  // Open mapping editor for a TRANSFORM policy
+  const handleViewMapping = async (policyId: string) => {
+    try {
+      const policy = await get<PolicyItem>(`/v1/policies/${policyId}`);
+      setViewingPolicy(policy);
+      setEditConfig(policy.config || '{}');
+    } catch {
+      setError('Failed to load policy config');
+    }
+  };
+
+  // Save updated mapping
+  const handleSaveMapping = async () => {
+    if (!viewingPolicy) return;
+    setSaving(true);
+    setError('');
+    try {
+      await put(`/v1/policies/${viewingPolicy.id}`, {
+        name: viewingPolicy.name,
+        type: viewingPolicy.type,
+        config: editConfig,
+      });
+      setViewingPolicy(null);
+      loadData();
+    } catch {
+      setError('Failed to save mapping');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-16 w-full animate-pulse rounded-lg bg-slate-100" />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {error && (
+        <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <svg className="h-4 w-4 shrink-0 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+          </svg>
+          {error}
+          <button onClick={() => setError('')} className="ml-auto text-red-400 hover:text-red-600">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-900">Attached Policies</h3>
+          <p className="text-sm text-slate-500">Policies applied to this API and its routes</p>
+        </div>
+        {!readOnly && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => { setAttachMode('new'); setShowAttachModal(true); }}
+              className="inline-flex items-center gap-2 rounded-lg border border-purple-300 bg-purple-50 px-4 py-2.5 text-sm font-medium text-purple-700 shadow-sm transition hover:bg-purple-100"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              New Transform
+            </button>
+            <button
+              onClick={() => { setAttachMode('existing'); setShowAttachModal(true); }}
+              className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-purple-700"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+              Attach Existing
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Attachments list */}
+      {attachments.length === 0 ? (
+        <div className="rounded-xl border-2 border-dashed border-slate-200 p-12 text-center">
+          <svg className="mx-auto h-10 w-10 text-slate-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+          </svg>
+          <p className="mt-3 text-sm font-medium text-slate-400">No policies attached</p>
+          <p className="mt-1 text-xs text-slate-400">Attach rate limiting, transformation, CORS, or other policies to this API</p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/60">
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Policy</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Type</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Scope</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Route</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Priority</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {attachments.map((att) => (
+                <tr key={att.id} className="transition hover:bg-slate-50/80">
+                  <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-900">{att.policyName}</td>
+                  <td className="whitespace-nowrap px-5 py-4">
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${policyTypeBadge(att.policyType)}`}>
+                      {att.policyType}
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap px-5 py-4">
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                      att.scope === 'ROUTE' ? 'bg-teal-100 text-teal-800 ring-1 ring-teal-300' : 'bg-blue-100 text-blue-800 ring-1 ring-blue-300'
+                    }`}>
+                      {att.scope}
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap px-5 py-4 font-mono text-xs text-slate-500">
+                    {att.routePath || '\u2014'}
+                  </td>
+                  <td className="whitespace-nowrap px-5 py-4 text-slate-500">{att.priority}</td>
+                  <td className="whitespace-nowrap px-5 py-4">
+                    <div className="flex items-center gap-2">
+                      {att.policyType === 'TRANSFORM' && (
+                        <button
+                          onClick={() => handleViewMapping(att.policyId)}
+                          className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-purple-600 transition hover:bg-purple-50 ring-1 ring-purple-200"
+                        >
+                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          Configure Mapping
+                        </button>
+                      )}
+                      {!readOnly && (
+                        <button
+                          onClick={() => handleDetach(att.id)}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50"
+                        >
+                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                          </svg>
+                          Detach
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── View/Edit Mapping Modal ── */}
+      {viewingPolicy && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setViewingPolicy(null)}>
+          <div className="mx-4 w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-0 shadow-2xl ring-1 ring-slate-200" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Configure Mapping: {viewingPolicy.name}</h3>
+                <p className="mt-0.5 text-sm text-slate-500">Edit request/response field mappings, headers, query params, and URL rewrite</p>
+              </div>
+              <button className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600" onClick={() => setViewingPolicy(null)}>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="px-6 py-5">
+              <TransformationBuilder
+                value={editConfig}
+                onChange={(json: string) => setEditConfig(json)}
+                apiUrl={process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8082'}
+              />
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
+              <button type="button" className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50" onClick={() => setViewingPolicy(null)}>Cancel</button>
+              <button
+                onClick={handleSaveMapping}
+                disabled={saving || readOnly}
+                className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {saving && <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>}
+                {saving ? 'Saving...' : 'Save Mapping'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Attach / Create Modal ── */}
+      {showAttachModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowAttachModal(false)}>
+          <div className={`mx-4 w-full max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-0 shadow-2xl ring-1 ring-slate-200 ${attachMode === 'new' ? 'max-w-3xl' : 'max-w-lg'}`} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">
+                  {attachMode === 'new' ? 'Create & Attach Transform Policy' : 'Attach Existing Policy'}
+                </h3>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  {attachMode === 'new' ? 'Define transformation mappings and attach to this API' : 'Link an existing policy to this API or a specific route'}
+                </p>
+              </div>
+              <button className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600" onClick={() => setShowAttachModal(false)}>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {/* Mode toggle */}
+            <div className="flex border-b border-slate-200 px-6">
+              <button type="button" onClick={() => setAttachMode('existing')}
+                className={`relative px-4 py-3 text-sm font-medium transition ${attachMode === 'existing' ? 'text-purple-600' : 'text-slate-500 hover:text-slate-700'}`}>
+                Attach Existing
+                {attachMode === 'existing' && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-purple-600" />}
+              </button>
+              <button type="button" onClick={() => setAttachMode('new')}
+                className={`relative px-4 py-3 text-sm font-medium transition ${attachMode === 'new' ? 'text-purple-600' : 'text-slate-500 hover:text-slate-700'}`}>
+                Create New Transform
+                {attachMode === 'new' && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-purple-600" />}
+              </button>
+            </div>
+
+            {/* ── Attach Existing Form ── */}
+            {attachMode === 'existing' && (
+              <form onSubmit={handleAttach} className="space-y-5 px-6 py-5">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">Policy</label>
+                  <select className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm transition focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                    value={attachForm.policyId} onChange={(e) => setAttachForm({ ...attachForm, policyId: e.target.value })} required>
+                    <option value="">Select Policy...</option>
+                    {allPolicies.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">Scope</label>
+                  <select className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm transition focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                    value={attachForm.scope} onChange={(e) => setAttachForm({ ...attachForm, scope: e.target.value })}>
+                    <option value="API">API (applies to all routes)</option>
+                    <option value="ROUTE">ROUTE (specific route only)</option>
+                  </select>
+                </div>
+                {attachForm.scope === 'ROUTE' && (
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Route</label>
+                    <select className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm transition focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                      value={attachForm.routeId} onChange={(e) => setAttachForm({ ...attachForm, routeId: e.target.value })} required>
+                      <option value="">Select Route...</option>
+                      {routes.map((r) => (<option key={r.id} value={r.id}>{r.method} {r.path}</option>))}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">Priority</label>
+                  <input type="number" className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm transition focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                    value={attachForm.priority} onChange={(e) => setAttachForm({ ...attachForm, priority: parseInt(e.target.value) || 0 })} min={0} />
+                  <p className="mt-1.5 text-xs text-slate-500">Lower number = higher priority</p>
+                </div>
+                <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-5">
+                  <button type="button" className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50" onClick={() => setShowAttachModal(false)}>Cancel</button>
+                  <button type="submit" className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-purple-700 disabled:opacity-50" disabled={attaching}>
+                    {attaching ? 'Attaching...' : 'Attach Policy'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* ── Create New Transform Form ── */}
+            {attachMode === 'new' && (
+              <form onSubmit={handleCreateAndAttach} className="space-y-5 px-6 py-5">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Policy Name</label>
+                    <input type="text" className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                      placeholder="e.g. User API Field Mapping" value={newTransformForm.name} onChange={(e) => setNewTransformForm({ ...newTransformForm, name: e.target.value })} required />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Description</label>
+                    <input type="text" className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 transition focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                      placeholder="Optional description" value={newTransformForm.description} onChange={(e) => setNewTransformForm({ ...newTransformForm, description: e.target.value })} />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Scope</label>
+                    <select className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm transition focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                      value={newTransformForm.scope} onChange={(e) => setNewTransformForm({ ...newTransformForm, scope: e.target.value })}>
+                      <option value="API">API</option>
+                      <option value="ROUTE">ROUTE</option>
+                    </select>
+                  </div>
+                  {newTransformForm.scope === 'ROUTE' && (
+                    <div>
+                      <label className="mb-1.5 block text-sm font-medium text-slate-700">Route</label>
+                      <select className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm transition focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                        value={newTransformForm.routeId} onChange={(e) => setNewTransformForm({ ...newTransformForm, routeId: e.target.value })} required>
+                        <option value="">Select Route...</option>
+                        {routes.map((r) => (<option key={r.id} value={r.id}>{r.method} {r.path}</option>))}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">Priority</label>
+                    <input type="number" className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 shadow-sm transition focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
+                      value={newTransformForm.priority} onChange={(e) => setNewTransformForm({ ...newTransformForm, priority: parseInt(e.target.value) || 0 })} min={0} />
+                  </div>
+                </div>
+
+                {/* Transformation Builder */}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+                  <TransformationBuilder
+                    value={newTransformForm.config}
+                    onChange={(json: string) => setNewTransformForm({ ...newTransformForm, config: json })}
+                    apiUrl={process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8082'}
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-5">
+                  <button type="button" className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50" onClick={() => setShowAttachModal(false)}>Cancel</button>
+                  <button type="submit" className="inline-flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-purple-700 disabled:opacity-50" disabled={attaching}>
+                    {attaching && <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>}
+                    {attaching ? 'Creating...' : 'Create & Attach'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
         </div>
       )}
     </div>

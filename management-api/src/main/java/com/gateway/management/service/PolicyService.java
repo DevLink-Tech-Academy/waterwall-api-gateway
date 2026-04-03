@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gateway.management.dto.AttachPolicyRequest;
 import com.gateway.management.dto.CreatePolicyRequest;
+import com.gateway.management.dto.PolicyAttachmentResponse;
 import com.gateway.management.dto.PolicyResponse;
 import com.gateway.management.entity.ApiEntity;
 import com.gateway.management.entity.PolicyAttachmentEntity;
@@ -140,6 +141,20 @@ public class PolicyService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<PolicyAttachmentResponse> listAllAttachments() {
+        return policyAttachmentRepository.findAll().stream()
+                .map(this::toAttachmentResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<PolicyAttachmentResponse> getAttachmentsForApi(UUID apiId) {
+        return policyAttachmentRepository.findByApi_Id(apiId).stream()
+                .map(this::toAttachmentResponse)
+                .toList();
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     private PolicyEntity findPolicyOrThrow(UUID id) {
@@ -168,5 +183,25 @@ public class PolicyService {
                 .version(entity.getVersion())
                 .createdAt(entity.getCreatedAt())
                 .build();
+    }
+
+    private PolicyAttachmentResponse toAttachmentResponse(PolicyAttachmentEntity att) {
+        PolicyAttachmentResponse.PolicyAttachmentResponseBuilder builder = PolicyAttachmentResponse.builder()
+                .id(att.getId())
+                .policyId(att.getPolicy().getId())
+                .policyName(att.getPolicy().getName())
+                .policyType(att.getPolicy().getType())
+                .scope(att.getScope())
+                .priority(att.getPriority());
+
+        if (att.getApi() != null) {
+            builder.apiId(att.getApi().getId())
+                   .apiName(att.getApi().getName());
+        }
+        if (att.getRoute() != null) {
+            builder.routeId(att.getRoute().getId())
+                   .routePath(att.getRoute().getPath());
+        }
+        return builder.build();
     }
 }

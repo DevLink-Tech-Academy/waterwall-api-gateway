@@ -18,6 +18,7 @@ import java.util.UUID;
 public class ConfigRefreshRabbitConfig {
 
     public static final String CONFIG_REFRESH_QUEUE = "gateway-runtime.config.refresh." + UUID.randomUUID();
+    public static final String TRANSFORM_REFRESH_QUEUE = "gateway-runtime.transform.refresh." + UUID.randomUUID();
 
     @Bean
     public Queue configRefreshQueue() {
@@ -25,7 +26,17 @@ public class ConfigRefreshRabbitConfig {
     }
 
     @Bean
+    public Queue transformRefreshQueue() {
+        return new Queue(TRANSFORM_REFRESH_QUEUE, false, true, true);
+    }
+
+    @Bean
     public Binding configRefreshBinding(Queue configRefreshQueue, FanoutExchange configRefreshExchange) {
         return BindingBuilder.bind(configRefreshQueue).to(configRefreshExchange);
+    }
+
+    @Bean
+    public Binding transformRefreshBinding(Queue transformRefreshQueue, FanoutExchange configRefreshExchange) {
+        return BindingBuilder.bind(transformRefreshQueue).to(configRefreshExchange);
     }
 }

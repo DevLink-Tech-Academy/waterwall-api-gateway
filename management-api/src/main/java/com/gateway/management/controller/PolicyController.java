@@ -3,8 +3,10 @@ package com.gateway.management.controller;
 import com.gateway.common.auth.RequiresPermission;
 import com.gateway.management.dto.AttachPolicyRequest;
 import com.gateway.management.dto.CreatePolicyRequest;
+import com.gateway.management.dto.PolicyAttachmentResponse;
 import com.gateway.management.dto.PolicyResponse;
 import com.gateway.management.service.PolicyService;
+import com.gateway.management.service.TransformTemplateProvider;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -20,6 +22,7 @@ import java.util.UUID;
 public class PolicyController {
 
     private final PolicyService policyService;
+    private final TransformTemplateProvider transformTemplateProvider;
 
     @PostMapping
     @RequiresPermission("policy:create")
@@ -59,6 +62,24 @@ public class PolicyController {
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
+    // Also accept POST /v1/policies/attachments for frontend compatibility
+    @PostMapping("/attachments")
+    @RequiresPermission("policy:attach")
+    public ResponseEntity<Void> attachPolicyAlt(@Valid @RequestBody AttachPolicyRequest request) {
+        policyService.attachPolicy(request);
+        return ResponseEntity.status(HttpStatus.CREATED).build();
+    }
+
+    @GetMapping("/attachments")
+    public ResponseEntity<List<PolicyAttachmentResponse>> listAttachments() {
+        return ResponseEntity.ok(policyService.listAllAttachments());
+    }
+
+    @GetMapping("/attachments/api/{apiId}")
+    public ResponseEntity<List<PolicyAttachmentResponse>> getAttachmentsForApi(@PathVariable UUID apiId) {
+        return ResponseEntity.ok(policyService.getAttachmentsForApi(apiId));
+    }
+
     @DeleteMapping("/attachments/{id}")
     @RequiresPermission("policy:detach")
     public ResponseEntity<Void> detachPolicy(@PathVariable UUID id) {
@@ -69,5 +90,10 @@ public class PolicyController {
     @GetMapping("/api/{apiId}")
     public ResponseEntity<List<PolicyResponse>> getPoliciesForApi(@PathVariable UUID apiId) {
         return ResponseEntity.ok(policyService.getPoliciesForApi(apiId));
+    }
+
+    @GetMapping("/templates")
+    public ResponseEntity<List<TransformTemplateProvider.TransformTemplate>> getTransformTemplates() {
+        return ResponseEntity.ok(transformTemplateProvider.getTemplates());
     }
 }

@@ -1,0 +1,143 @@
+databaseChangeLog:
+  - changeSet:
+      id: 042-seed-transform-policies
+      author: gateway-team
+      context: dev,uat
+      changes:
+        - insert:
+            schemaName: gateway
+            tableName: policies
+            columns:
+              - column:
+                  name: id
+                  valueComputed: gen_random_uuid()
+              - column:
+                  name: name
+                  value: "Strip Internal Headers"
+              - column:
+                  name: type
+                  value: "TRANSFORM"
+              - column:
+                  name: config
+                  value: '{"response":{"headers":[{"action":"remove","name":"X-Internal-Request-Id"},{"action":"remove","name":"X-Debug-Info"},{"action":"remove","name":"Server"}]}}'
+              - column:
+                  name: description
+                  value: "Remove internal/debug headers from API responses"
+              - column:
+                  name: version
+                  valueNumeric: 1
+
+        - insert:
+            schemaName: gateway
+            tableName: policies
+            columns:
+              - column:
+                  name: id
+                  valueComputed: gen_random_uuid()
+              - column:
+                  name: name
+                  value: "Add API Version Header"
+              - column:
+                  name: type
+                  value: "TRANSFORM"
+              - column:
+                  name: config
+                  value: '{"response":{"headers":[{"action":"add","name":"X-API-Version","value":"1.0"},{"action":"add","name":"X-Powered-By","value":"API-Gateway"}]}}'
+              - column:
+                  name: description
+                  value: "Add version and gateway identification headers to all responses"
+              - column:
+                  name: version
+                  valueNumeric: 1
+
+        - insert:
+            schemaName: gateway
+            tableName: policies
+            columns:
+              - column:
+                  name: id
+                  valueComputed: gen_random_uuid()
+              - column:
+                  name: name
+                  value: "Request Body Field Mapping"
+              - column:
+                  name: type
+                  value: "TRANSFORM"
+              - column:
+                  name: config
+                  value: '{"request":{"body":[{"source":"user_name","target":"username"},{"source":"email_address","target":"email"},{"source":"phone_number","target":"phone"}]}}'
+              - column:
+                  name: description
+                  value: "Map legacy request field names to new API format"
+              - column:
+                  name: version
+                  valueNumeric: 1
+
+        - insert:
+            schemaName: gateway
+            tableName: policies
+            columns:
+              - column:
+                  name: id
+                  valueComputed: gen_random_uuid()
+              - column:
+                  name: name
+                  value: "Add Tracking Query Params"
+              - column:
+                  name: type
+                  value: "TRANSFORM"
+              - column:
+                  name: config
+                  value: '{"request":{"queryParams":[{"action":"add","name":"gateway","value":"true"},{"action":"add","name":"source","value":"api-gateway"}]}}'
+              - column:
+                  name: description
+                  value: "Add tracking query parameters to upstream requests"
+              - column:
+                  name: version
+                  valueNumeric: 1
+
+        - insert:
+            schemaName: gateway
+            tableName: policies
+            columns:
+              - column:
+                  name: id
+                  valueComputed: gen_random_uuid()
+              - column:
+                  name: name
+                  value: "URL Version Rewrite"
+              - column:
+                  name: type
+                  value: "TRANSFORM"
+              - column:
+                  name: config
+                  value: '{"request":{"urlRewrite":{"pattern":"/api/v1/(.*)","replacement":"/api/v2/$1"}}}'
+              - column:
+                  name: description
+                  value: "Rewrite API v1 paths to v2 upstream endpoints"
+              - column:
+                  name: version
+                  valueNumeric: 1
+
+        - insert:
+            schemaName: gateway
+            tableName: policies
+            columns:
+              - column:
+                  name: id
+                  valueComputed: gen_random_uuid()
+              - column:
+                  name: name
+                  value: "Full Request/Response Transform"
+              - column:
+                  name: type
+                  value: "TRANSFORM"
+              - column:
+                  name: config
+                  value: '{"request":{"headers":[{"action":"add","name":"X-Gateway-Request","value":"true"},{"action":"remove","name":"X-Debug"}],"queryParams":[{"action":"add","name":"format","value":"json"}]},"response":{"headers":[{"action":"remove","name":"Server"},{"action":"add","name":"X-Gateway-Response","value":"true"}],"body":[{"source":"data","target":"result"},{"source":"meta.total","target":"count"}]}}'
+              - column:
+                  name: description
+                  value: "Complete request and response transformation with headers, params, and body mapping"
+              - column:
+                  name: version
+                  valueNumeric: 1

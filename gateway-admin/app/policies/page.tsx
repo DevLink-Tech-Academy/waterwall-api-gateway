@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import TransformationBuilder from '../components/TransformationBuilder';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8082';
 
@@ -93,6 +94,12 @@ export default function PoliciesPage() {
   });
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState('');
+
+  /* View/Edit policy modal */
+  const [viewingPolicy, setViewingPolicy] = useState<Policy | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', type: '', description: '', config: '{}' });
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState('');
 
   /* Attach policy modal */
   const [showAttachModal, setShowAttachModal] = useState(false);
@@ -196,6 +203,60 @@ export default function PoliciesPage() {
     }
   };
 
+  const handleViewPolicy = async (policy: Policy) => {
+    setViewingPolicy(policy);
+    setEditForm({
+      name: policy.name,
+      type: policy.type,
+      description: policy.description || '',
+      config: policy.config || '{}',
+    });
+    setEditError('');
+  };
+
+  const handleUpdatePolicy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!viewingPolicy) return;
+    setEditLoading(true);
+    setEditError('');
+    try {
+      const res = await fetch(`${API_URL}/v1/policies/${viewingPolicy.id}`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          name: editForm.name,
+          type: editForm.type,
+          description: editForm.description,
+          config: editForm.config,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.message || 'Failed to update policy');
+      }
+      setViewingPolicy(null);
+      fetchData();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Failed to update policy');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleDeletePolicy = async (id: string, name: string) => {
+    if (!confirm(`Delete policy "${name}"? This will also remove all its attachments.`)) return;
+    try {
+      const res = await fetch(`${API_URL}/v1/policies/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      if (!res.ok) throw new Error('Failed to delete policy');
+      fetchData();
+    } catch {
+      setError('Failed to delete policy');
+    }
+  };
+
   /* Loading skeleton */
   if (loading) {
     return (
@@ -288,12 +349,13 @@ export default function PoliciesPage() {
                   <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">Type</th>
                   <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">Description</th>
                   <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">Created</th>
+                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {policies.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-16 text-center">
+                    <td colSpan={5} className="px-6 py-16 text-center">
                       <div className="flex flex-col items-center gap-2">
                         <svg className="h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.251 2.251 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
@@ -315,6 +377,28 @@ export default function PoliciesPage() {
                       <td className="px-6 py-4 text-gray-500">{p.description || '\u2014'}</td>
                       <td className="whitespace-nowrap px-6 py-4 text-gray-500">
                         {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : '\u2014'}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleViewPolicy(p)}
+                            className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-indigo-600 transition hover:bg-indigo-50 ring-1 ring-indigo-200"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                            </svg>
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeletePolicy(p.id, p.name)}
+                            className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 ring-1 ring-red-200"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                            </svg>
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -385,7 +469,7 @@ export default function PoliciesPage() {
             onClick={() => setShowCreateModal(false)}
           >
             <div
-              className="mx-4 w-full max-w-lg rounded-2xl bg-white p-0 shadow-2xl ring-1 ring-gray-200"
+              className={`mx-4 w-full rounded-2xl bg-white p-0 shadow-2xl ring-1 ring-gray-200 ${createForm.type === 'TRANSFORM' ? 'max-w-2xl' : 'max-w-lg'}`}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
@@ -450,14 +534,22 @@ export default function PoliciesPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Configuration (JSON)</label>
-                  <textarea
-                    className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 font-mono text-sm text-gray-900 shadow-sm placeholder:text-gray-400 transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                    rows={6}
-                    placeholder='{"limit": 100, "window": "1m"}'
-                    value={createForm.config}
-                    onChange={(e) => setCreateForm({ ...createForm, config: e.target.value })}
-                  />
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Configuration</label>
+                  {createForm.type === 'TRANSFORM' ? (
+                    <TransformationBuilder
+                      value={createForm.config}
+                      onChange={(json) => setCreateForm({ ...createForm, config: json })}
+                      apiUrl={API_URL}
+                    />
+                  ) : (
+                    <textarea
+                      className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 font-mono text-sm text-gray-900 shadow-sm placeholder:text-gray-400 transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                      rows={6}
+                      placeholder='{"limit": 100, "window": "1m"}'
+                      value={createForm.config}
+                      onChange={(e) => setCreateForm({ ...createForm, config: e.target.value })}
+                    />
+                  )}
                 </div>
 
                 <div className="flex items-center justify-end gap-3 border-t border-gray-100 pt-5">
@@ -597,6 +689,119 @@ export default function PoliciesPage() {
                       </svg>
                     )}
                     {attachLoading ? 'Attaching...' : 'Attach Policy'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* View/Edit Policy Modal */}
+        {viewingPolicy && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+            onClick={() => setViewingPolicy(null)}
+          >
+            <div
+              className={`mx-4 w-full max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-0 shadow-2xl ring-1 ring-gray-200 ${editForm.type === 'TRANSFORM' ? 'max-w-3xl' : 'max-w-lg'}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Edit Policy</h3>
+                  <p className="mt-0.5 text-sm text-gray-500">Update policy configuration</p>
+                </div>
+                <button
+                  className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
+                  onClick={() => setViewingPolicy(null)}
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <form onSubmit={handleUpdatePolicy} className="space-y-5 px-6 py-5">
+                {editError && (
+                  <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                    <svg className="h-4 w-4 shrink-0 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                    </svg>
+                    {editError}
+                  </div>
+                )}
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Name</label>
+                  <input
+                    type="text"
+                    className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Type</label>
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${getTypeBadgeClasses(editForm.type)}`}>
+                      {editForm.type}
+                    </span>
+                    <span className="text-xs text-gray-400">Type cannot be changed after creation</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Description</label>
+                  <input
+                    type="text"
+                    className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    value={editForm.description}
+                    onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Configuration</label>
+                  {editForm.type === 'TRANSFORM' ? (
+                    <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+                      <TransformationBuilder
+                        value={editForm.config}
+                        onChange={(json: string) => setEditForm({ ...editForm, config: json })}
+                        apiUrl={API_URL}
+                      />
+                    </div>
+                  ) : (
+                    <textarea
+                      className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 font-mono text-sm text-gray-900 shadow-sm placeholder:text-gray-400 transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                      rows={8}
+                      value={editForm.config}
+                      onChange={(e) => setEditForm({ ...editForm, config: e.target.value })}
+                    />
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-3 border-t border-gray-100 pt-5">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50"
+                    onClick={() => setViewingPolicy(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={editLoading}
+                  >
+                    {editLoading && (
+                      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    )}
+                    {editLoading ? 'Saving...' : 'Save Changes'}
                   </button>
                 </div>
               </form>

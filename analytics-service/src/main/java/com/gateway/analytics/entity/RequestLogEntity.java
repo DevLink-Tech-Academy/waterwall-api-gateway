@@ -66,7 +66,7 @@ public class RequestLogEntity {
     @Column(name = "response_size")
     private long responseSize;
 
-    @Column(name = "auth_type", length = 20)
+    @Column(name = "auth_type", length = 50)
     private String authType;
 
     @Column(name = "client_ip", length = 45)
@@ -75,7 +75,7 @@ public class RequestLogEntity {
     @Column(name = "user_agent", length = 500)
     private String userAgent;
 
-    @Column(name = "error_code", length = 20)
+    @Column(name = "error_code", length = 50)
     private String errorCode;
 
     @Column(name = "gateway_node", length = 100)

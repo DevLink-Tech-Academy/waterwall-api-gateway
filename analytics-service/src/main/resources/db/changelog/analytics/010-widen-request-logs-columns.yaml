@@ -1,0 +1,16 @@
+databaseChangeLog:
+  - changeSet:
+      id: analytics-010-widen-request-logs-columns
+      author: gateway-team
+      comment: "Widen error_code and auth_type columns to accommodate longer values like UPSTREAM_CONNECT_REFUSED"
+      changes:
+        - modifyDataType:
+            schemaName: analytics
+            tableName: request_logs
+            columnName: error_code
+            newDataType: varchar(50)
+        - modifyDataType:
+            schemaName: analytics
+            tableName: request_logs
+            columnName: auth_type
+            newDataType: varchar(50)
