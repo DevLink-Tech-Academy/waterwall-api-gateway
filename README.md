@@ -132,43 +132,70 @@ PostgreSQL with four schemas, managed by Liquibase migrations:
 
 ## Getting Started
 
-There are three ways to run Waterwall, from simplest to most flexible.
+There are four ways to run Waterwall, from simplest to most flexible.
 
-### Option 1: One-Command Setup (recommended)
+### Option 1: Pre-built Release (recommended)
 
-The `setup.sh` script handles everything — installs missing prerequisites, starts infrastructure, builds all services, and launches the platform.
+Downloads a pre-built release from GitHub — no compilation needed. All services are managed by [PM2](https://pm2.keymetrics.io/) for auto-restart and boot persistence.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DevLink-Tech-Academy/waterwall-api-gateway/main/setup.sh -o setup.sh
 chmod +x setup.sh
-./setup.sh
+sudo bash setup.sh
+```
+
+To install a specific version:
+
+```bash
+sudo bash setup.sh --version v1.0.0
+```
+
+The script will:
+
+1. Detect your OS and install missing prerequisites (Java 21, Node.js, Docker)
+2. Download and extract the latest release from GitHub Releases
+3. Start PostgreSQL and RabbitMQ via Docker Compose
+4. Start all 7 services with PM2 and print access URLs
+
+**Prerequisites installed automatically:** Java 21, Node.js 20, Docker, PM2. No Maven or build tools needed.
+
+After the initial setup, use these PM2 commands:
+
+```bash
+sudo pm2 status                  # view all services
+sudo pm2 logs <service-name>     # tail logs
+sudo pm2 restart all             # restart everything
+sudo pm2 stop all                # stop everything
+sudo pm2 monit                   # real-time monitoring dashboard
+```
+
+To clean up and start fresh:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DevLink-Tech-Academy/waterwall-api-gateway/main/cleanup.sh -o cleanup.sh
+sudo bash cleanup.sh --all       # stop services, remove containers, wipe data
+sudo bash setup.sh               # fresh install
+```
+
+### Option 2: Build from Source
+
+For contributors or custom builds. Clones the repo and compiles everything locally.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DevLink-Tech-Academy/waterwall-api-gateway/main/setup.sh -o setup.sh
+chmod +x setup.sh
+sudo bash setup.sh --build-from-source
 ```
 
 Or from an existing clone:
 
 ```bash
-./setup.sh --no-clone
+sudo bash setup.sh --no-clone
 ```
 
-After the initial setup, use `start.sh` to start the platform on subsequent runs:
+**Additional prerequisites:** Git, Maven 3.9+
 
-```bash
-./start.sh              # start everything
-./start.sh --build      # rebuild backend first, then start
-```
-
-The script will:
-
-1. Detect your OS (Ubuntu/Debian, Fedora, CentOS, Arch, macOS, Windows)
-2. Install any missing tools: Git, Java 21, Maven, Node.js 20, Docker
-3. Start PostgreSQL and RabbitMQ via Docker Compose
-4. Build all 5 backend services with Maven
-5. Install frontend dependencies and build both portals
-6. Start all 7 services and print access URLs
-
-Press `Ctrl+C` to stop everything.
-
-> On Linux/macOS, prerequisites are installed automatically. On Windows, the script prints download links for any missing tools.
+> On Linux/macOS, all prerequisites are installed automatically. On Windows, the script prints download links for any missing tools.
 
 ### Option 2: Docker Compose (all-in-Docker)
 
