@@ -602,17 +602,27 @@ API_BASE="${SERVER_PROTO}://${SERVER_HOST}"
 log "Server address: $API_BASE"
 
 # Replace localhost URLs in pre-built frontend files
-if [[ -d "$PROJECT_ROOT/gateway-portal/.next" ]]; then
+if [[ -d "$PROJECT_ROOT/gateway-portal/.next" && "$SERVER_HOST" != "localhost" ]]; then
   step "Configuring frontend API endpoints"
 
-  # Replace in all JS chunks
-  find "$PROJECT_ROOT/gateway-portal/.next" -name "*.js" -type f -exec \
-    sed -i "s|http://localhost:8081|${API_BASE}:8081|g; s|http://localhost:8082|${API_BASE}:8082|g; s|http://localhost:8080|${API_BASE}:8080|g; s|http://localhost:8083|${API_BASE}:8083|g" {} +
+  # Replace in all JS, HTML, and JSON files across the entire .next directory
+  for portal_dir in "$PROJECT_ROOT/gateway-portal/.next" "$PROJECT_ROOT/gateway-admin/.next"; do
+    if [[ -d "$portal_dir" ]]; then
+      # Find all text files that contain localhost references
+      grep -rl "localhost:808[0-9]" "$portal_dir" 2>/dev/null | while read -r file; do
+        sed -i "s|http://localhost:8081|${API_BASE}:8081|g; s|http://localhost:8082|${API_BASE}:8082|g; s|http://localhost:8080|${API_BASE}:8080|g; s|http://localhost:8083|${API_BASE}:8083|g" "$file"
+      done
+    fi
+  done
 
-  find "$PROJECT_ROOT/gateway-admin/.next" -name "*.js" -type f -exec \
-    sed -i "s|http://localhost:8081|${API_BASE}:8081|g; s|http://localhost:8082|${API_BASE}:8082|g; s|http://localhost:8080|${API_BASE}:8080|g; s|http://localhost:8083|${API_BASE}:8083|g" {} +
-
-  log "Frontend endpoints updated to $API_BASE"
+  # Verify replacement worked
+  REMAINING=$(grep -rl "localhost:808[0-9]" "$PROJECT_ROOT/gateway-portal/.next" 2>/dev/null | grep -v cache | wc -l)
+  if [[ "$REMAINING" -eq 0 ]]; then
+    log "Frontend endpoints updated to $API_BASE"
+  else
+    warn "Some files still contain localhost references ($REMAINING files)"
+    warn "This may be in cache files — try clearing: rm -rf gateway-portal/.next/cache gateway-admin/.next/cache"
+  fi
 fi
 
 # -----------------------------------------------
