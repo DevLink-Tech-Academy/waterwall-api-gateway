@@ -111,11 +111,56 @@ public class MonetizationService {
                         Collectors.reducing(BigDecimal.ZERO, InvoiceEntity::getTotalAmount, BigDecimal::add)
                 ));
 
+        // Compute totals for backwards compatibility with admin UI
+        BigDecimal totalRevenue = periodInvoices.stream()
+                .map(InvoiceEntity::getTotalAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        long paidCount = periodInvoices.stream()
+                .filter(inv -> "PAID".equals(inv.getStatus()))
+                .count();
+
+        BigDecimal paidTotal = periodInvoices.stream()
+                .filter(inv -> "PAID".equals(inv.getStatus()))
+                .map(InvoiceEntity::getTotalAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal outstanding = periodInvoices.stream()
+                .filter(inv -> !"PAID".equals(inv.getStatus()) && !"REFUNDED".equals(inv.getStatus()))
+                .map(InvoiceEntity::getTotalAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal averagePerInvoice = periodInvoices.isEmpty()
+                ? BigDecimal.ZERO
+                : totalRevenue.divide(BigDecimal.valueOf(periodInvoices.size()), 2, java.math.RoundingMode.HALF_UP);
+
+        String defaultCurrency = paymentGatewaySettingsService.getDefaultCurrency();
+
+        // Build per-plan breakdown with invoice counts
+        List<Map<String, Object>> byPlan = new java.util.ArrayList<>();
+        for (Map.Entry<String, BigDecimal> entry : perPlanRevenue.entrySet()) {
+            long planInvoiceCount = periodInvoices.stream()
+                    .filter(inv -> inv.getLineItems() != null && inv.getLineItems().toString().contains(entry.getKey()))
+                    .count();
+            byPlan.add(Map.of(
+                    "planName", entry.getKey(),
+                    "planId", entry.getKey(),
+                    "revenue", entry.getValue(),
+                    "invoiceCount", planInvoiceCount
+            ));
+        }
+
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("period", period);
-        report.put("totalRevenueByCurrency", totalByCurrency);
+        report.put("totalRevenue", totalRevenue);
+        report.put("currency", defaultCurrency);
+        report.put("paidInvoices", paidCount);
+        report.put("outstanding", outstanding);
+        report.put("averagePerInvoice", averagePerInvoice);
         report.put("invoiceCount", periodInvoices.size());
+        report.put("totalRevenueByCurrency", totalByCurrency);
         report.put("perPlanBreakdown", perPlanRevenue);
+        report.put("byPlan", byPlan);
         report.put("revenueByStatus", revenueByStatus);
 
         log.info("Generated revenue report for period={} invoices={}", period, periodInvoices.size());
