@@ -86,6 +86,9 @@ public class MonetizationService {
     }
 
     public List<InvoiceEntity> listInvoices(UUID consumerId) {
+        if (consumerId == null) {
+            return invoiceRepository.findAll();
+        }
         return invoiceRepository.findByConsumerId(consumerId);
     }
 
