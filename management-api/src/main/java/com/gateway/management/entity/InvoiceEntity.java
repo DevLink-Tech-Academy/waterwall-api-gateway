@@ -58,6 +58,19 @@ public class InvoiceEntity {
     @Column(name = "paid_at")
     private Instant paidAt;
 
+    @Builder.Default
+    @Column(name = "retry_count")
+    private Integer retryCount = 0;
+
+    @Column(name = "next_retry_at")
+    private Instant nextRetryAt;
+
+    @Column(name = "dunning_started_at")
+    private Instant dunningStartedAt;
+
+    @Column(name = "dunning_status", length = 30)
+    private String dunningStatus;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;

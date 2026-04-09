@@ -33,4 +33,6 @@ public class CreatePlanRequest {
     private String billingPeriod;
     private Long includedRequests;
     private BigDecimal overageRate;
+
+    private DunningConfig dunningConfig;
 }

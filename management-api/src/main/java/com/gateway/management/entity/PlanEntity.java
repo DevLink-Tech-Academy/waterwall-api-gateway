@@ -69,6 +69,10 @@ public class PlanEntity {
     @Column(name = "overage_rate", precision = 10, scale = 6)
     private BigDecimal overageRate;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "dunning_config", columnDefinition = "jsonb")
+    private String dunningConfig;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;

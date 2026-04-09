@@ -35,6 +35,8 @@ public class PlanResponse {
     private Long includedRequests;
     private BigDecimal overageRate;
 
+    private DunningConfig dunningConfig;
+
     private Instant createdAt;
     private Instant updatedAt;
 }

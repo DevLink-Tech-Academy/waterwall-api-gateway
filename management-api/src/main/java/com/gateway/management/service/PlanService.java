@@ -3,6 +3,7 @@ package com.gateway.management.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gateway.management.dto.CreatePlanRequest;
+import com.gateway.management.dto.DunningConfig;
 import com.gateway.management.dto.PlanResponse;
 import com.gateway.management.dto.QuotaConfig;
 import com.gateway.management.dto.RateLimitsConfig;
@@ -41,6 +42,7 @@ public class PlanService {
                 .billingPeriod(request.getBillingPeriod())
                 .includedRequests(request.getIncludedRequests())
                 .overageRate(request.getOverageRate())
+                .dunningConfig(serializeJson(request.getDunningConfig()))
                 .build();
 
         PlanEntity saved = planRepository.save(entity);
@@ -98,6 +100,9 @@ public class PlanService {
         }
         if (request.getOverageRate() != null) {
             entity.setOverageRate(request.getOverageRate());
+        }
+        if (request.getDunningConfig() != null) {
+            entity.setDunningConfig(serializeJson(request.getDunningConfig()));
         }
 
         PlanEntity saved = planRepository.save(entity);
@@ -164,6 +169,7 @@ public class PlanService {
                 .billingPeriod(entity.getBillingPeriod())
                 .includedRequests(entity.getIncludedRequests())
                 .overageRate(entity.getOverageRate())
+                .dunningConfig(deserializeJson(entity.getDunningConfig(), DunningConfig.class))
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .build();
