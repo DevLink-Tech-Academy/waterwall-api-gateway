@@ -337,8 +337,51 @@ export default function MonetizationPage() {
     try {
       const res = await fetch(`${API_URL}/v1/monetization/revenue?period=${period}`, { headers: authHeaders() });
       if (!res.ok) throw new Error(`Failed to load revenue data (${res.status})`);
-      const data: RevenueData = await res.json();
-      setRevenue(data);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw: any = await res.json();
+
+      // Transform backend response shape to frontend RevenueData
+      const currency = raw.currency
+        ?? Object.keys(raw.totalRevenueByCurrency ?? {})[0]
+        ?? 'USD';
+      const totalRevenue = raw.totalRevenue
+        ?? Object.values(raw.totalRevenueByCurrency ?? {}).reduce((a: number, b: number) => a + b, 0) as number;
+      const invoiceCount = raw.invoiceCount ?? 0;
+
+      // byStatus: backend may return array of {status,count,total} or a map of status->amount
+      let byStatus: RevenueData['byStatus'] = [];
+      if (Array.isArray(raw.byStatus)) {
+        byStatus = raw.byStatus;
+      } else if (raw.revenueByStatus && typeof raw.revenueByStatus === 'object') {
+        byStatus = Object.entries(raw.revenueByStatus).map(([status, total]) => ({
+          status,
+          count: 0,
+          total: total as number,
+        }));
+      }
+
+      const paidInvoices = raw.paidInvoices
+        ?? byStatus.find(s => s.status === 'PAID')?.count
+        ?? 0;
+      const outstanding = raw.outstanding
+        ?? byStatus.filter(s => s.status !== 'PAID' && s.status !== 'DRAFT').reduce((sum, s) => sum + s.total, 0);
+      const averagePerInvoice = raw.averagePerInvoice
+        ?? (invoiceCount > 0 ? totalRevenue / invoiceCount : 0);
+
+      // byPlan: backend may return array of {planName,planId,revenue,invoiceCount} or a map of planName->revenue
+      let byPlan: RevenueData['byPlan'] = [];
+      if (Array.isArray(raw.byPlan)) {
+        byPlan = raw.byPlan;
+      } else if (raw.perPlanBreakdown && typeof raw.perPlanBreakdown === 'object') {
+        byPlan = Object.entries(raw.perPlanBreakdown).map(([planName, revenue]) => ({
+          planName,
+          planId: planName,
+          revenue: revenue as number,
+          invoiceCount: 0,
+        }));
+      }
+
+      setRevenue({ totalRevenue, averagePerInvoice, paidInvoices, outstanding, currency, byPlan, byStatus });
     } catch (err) {
       setRevenueError(err instanceof Error ? err.message : 'Failed to load revenue data');
     } finally {
