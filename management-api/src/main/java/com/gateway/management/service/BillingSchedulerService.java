@@ -137,7 +137,7 @@ public class BillingSchedulerService {
                     defaultMethod.getPaystackAuthorizationCode(),
                     defaultMethod.getPaystackCustomerCode(),
                     invoice.getTotalAmount(),
-                    invoice.getCurrency() != null ? invoice.getCurrency() : "USD",
+                    invoice.getCurrency() != null ? invoice.getCurrency() : "NGN",
                     reference);
 
             if (result.isSuccessful()) {

@@ -63,7 +63,7 @@ public class MonetizationService {
 
         // Calculate cost based on the pricing model
         BigDecimal totalAmount = calculateCost(plan, requestCount);
-        String currency = plan != null && plan.getCurrency() != null ? plan.getCurrency() : "USD";
+        String currency = plan != null && plan.getCurrency() != null ? plan.getCurrency() : "NGN";
 
         // Build line items JSON
         String lineItemsJson = buildLineItemsJson(plan, requestCount, totalAmount);
@@ -96,7 +96,7 @@ public class MonetizationService {
         // Group revenue by currency
         Map<String, BigDecimal> totalByCurrency = periodInvoices.stream()
                 .collect(Collectors.groupingBy(
-                        inv -> inv.getCurrency() != null ? inv.getCurrency() : "USD",
+                        inv -> inv.getCurrency() != null ? inv.getCurrency() : "NGN",
                         LinkedHashMap::new,
                         Collectors.reducing(BigDecimal.ZERO, InvoiceEntity::getTotalAmount, BigDecimal::add)
                 ));

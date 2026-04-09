@@ -38,7 +38,7 @@ public class PlanService {
                 // Pricing fields
                 .pricingModel(request.getPricingModel() != null ? request.getPricingModel() : "FREE")
                 .priceAmount(request.getPriceAmount())
-                .currency(request.getCurrency() != null ? request.getCurrency() : "USD")
+                .currency(request.getCurrency() != null ? request.getCurrency() : "NGN")
                 .billingPeriod(request.getBillingPeriod())
                 .includedRequests(request.getIncludedRequests())
                 .overageRate(request.getOverageRate())
