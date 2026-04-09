@@ -1,10 +1,15 @@
 package com.gateway.management.service;
 
+import com.gateway.management.entity.CreditNoteEntity;
 import com.gateway.management.entity.InvoiceEntity;
 import com.gateway.management.entity.PlanEntity;
+import com.gateway.management.repository.CreditNoteRepository;
 import com.gateway.management.repository.InvoiceRepository;
 import com.gateway.management.repository.PaymentMethodRepository;
 import com.gateway.management.repository.PlanRepository;
+import com.gateway.management.service.payment.PaymentProvider;
+import com.gateway.management.service.payment.PaymentProviderFactory;
+import com.gateway.management.service.payment.PaymentResult;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.Query;
@@ -28,6 +33,8 @@ public class MonetizationService {
     private final PlanRepository planRepository;
     private final InvoiceRepository invoiceRepository;
     private final PaymentMethodRepository paymentMethodRepository;
+    private final CreditNoteRepository creditNoteRepository;
+    private final PaymentProviderFactory paymentProviderFactory;
     private final EntityManager entityManager;
 
     // ── Invoice Generation ────────────────────────────────────────────────
@@ -84,17 +91,18 @@ public class MonetizationService {
     // ── Revenue Report ────────────────────────────────────────────────────
 
     public Map<String, Object> getRevenueReport(String period) {
-        // Parse the period to filter invoices within that billing window
         List<InvoiceEntity> periodInvoices = getInvoicesForPeriod(period);
 
-        BigDecimal totalRevenue = periodInvoices.stream()
-                .map(InvoiceEntity::getTotalAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // Group revenue by currency
+        Map<String, BigDecimal> totalByCurrency = periodInvoices.stream()
+                .collect(Collectors.groupingBy(
+                        inv -> inv.getCurrency() != null ? inv.getCurrency() : "USD",
+                        LinkedHashMap::new,
+                        Collectors.reducing(BigDecimal.ZERO, InvoiceEntity::getTotalAmount, BigDecimal::add)
+                ));
 
-        // Per-plan breakdown based on real invoice data
         Map<String, BigDecimal> perPlanRevenue = buildPerPlanRevenue(periodInvoices);
 
-        // Revenue by status
         Map<String, BigDecimal> revenueByStatus = periodInvoices.stream()
                 .collect(Collectors.groupingBy(
                         inv -> inv.getStatus() != null ? inv.getStatus() : "UNKNOWN",
@@ -104,15 +112,60 @@ public class MonetizationService {
 
         Map<String, Object> report = new LinkedHashMap<>();
         report.put("period", period);
-        report.put("totalRevenue", totalRevenue);
-        report.put("currency", "USD");
+        report.put("totalRevenueByCurrency", totalByCurrency);
         report.put("invoiceCount", periodInvoices.size());
         report.put("perPlanBreakdown", perPlanRevenue);
         report.put("revenueByStatus", revenueByStatus);
 
-        log.info("Generated revenue report for period={} totalRevenue={} invoices={}",
-                period, totalRevenue, periodInvoices.size());
+        log.info("Generated revenue report for period={} invoices={}", period, periodInvoices.size());
         return report;
+    }
+
+    // ── Refund ────────────────────────────────────────────────────────────
+
+    @Transactional
+    public CreditNoteEntity refundInvoice(UUID invoiceId, BigDecimal amount, String reason) {
+        InvoiceEntity invoice = invoiceRepository.findById(invoiceId)
+                .orElseThrow(() -> new EntityNotFoundException("Invoice not found: " + invoiceId));
+
+        if (!"PAID".equals(invoice.getStatus())) {
+            throw new IllegalStateException("Can only refund PAID invoices. Current status: " + invoice.getStatus());
+        }
+
+        BigDecimal refundAmount = amount != null ? amount : invoice.getTotalAmount();
+
+        String refundReference = null;
+        if (invoice.getPaystackReference() != null) {
+            try {
+                PaymentProvider provider = paymentProviderFactory.getActiveProvider();
+                PaymentResult.RefundResult result = provider.refund(
+                        invoice.getPaystackReference(), refundAmount);
+                if (result.isSuccessful()) {
+                    refundReference = result.getRefundReference();
+                } else {
+                    log.warn("Payment provider refund failed: {}", result.getMessage());
+                }
+            } catch (Exception e) {
+                log.error("Refund processing failed for invoice {}: {}", invoiceId, e.getMessage());
+            }
+        }
+
+        boolean isFullRefund = refundAmount.compareTo(invoice.getTotalAmount()) >= 0;
+        invoice.setStatus(isFullRefund ? "REFUNDED" : "PARTIALLY_REFUNDED");
+        invoiceRepository.save(invoice);
+
+        CreditNoteEntity creditNote = CreditNoteEntity.builder()
+                .invoiceId(invoiceId)
+                .consumerId(invoice.getConsumerId())
+                .amount(refundAmount)
+                .currency(invoice.getCurrency())
+                .reason(reason)
+                .refundReference(refundReference)
+                .build();
+
+        CreditNoteEntity saved = creditNoteRepository.save(creditNote);
+        log.info("Refund processed: creditNote={} invoice={} amount={}", saved.getId(), invoiceId, refundAmount);
+        return saved;
     }
 
     // ── Private Helpers ───────────────────────────────────────────────────

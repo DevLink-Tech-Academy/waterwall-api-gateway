@@ -2,6 +2,7 @@ package com.gateway.management.controller;
 
 import com.gateway.management.dto.CreatePlanRequest;
 import com.gateway.management.dto.PlanResponse;
+import com.gateway.management.entity.CreditNoteEntity;
 import com.gateway.management.entity.InvoiceEntity;
 import com.gateway.management.service.MonetizationService;
 import com.gateway.management.service.PlanService;
@@ -10,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -72,5 +74,17 @@ public class MonetizationController {
     public ResponseEntity<Map<String, Object>> getRevenueReport(
             @RequestParam(defaultValue = "monthly") String period) {
         return ResponseEntity.ok(monetizationService.getRevenueReport(period));
+    }
+
+    // ── Refunds ──────────────────────────────────────────────────────────
+
+    @PostMapping("/invoices/{id}/refund")
+    public ResponseEntity<CreditNoteEntity> refundInvoice(
+            @PathVariable UUID id,
+            @RequestBody Map<String, String> request) {
+        BigDecimal amount = request.containsKey("amount")
+                ? new BigDecimal(request.get("amount")) : null;
+        String reason = request.getOrDefault("reason", "Admin refund");
+        return ResponseEntity.ok(monetizationService.refundInvoice(id, amount, reason));
     }
 }

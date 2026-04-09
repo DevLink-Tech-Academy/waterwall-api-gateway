@@ -1,0 +1,44 @@
+databaseChangeLog:
+  - changeSet:
+      id: gw-044-create-credit-notes
+      author: gateway-team
+      changes:
+        - createTable:
+            schemaName: gateway
+            tableName: credit_notes
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  defaultValueComputed: gen_random_uuid()
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: invoice_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: consumer_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: amount
+                  type: decimal(12,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: currency
+                  type: varchar(10)
+                  defaultValue: "USD"
+              - column:
+                  name: reason
+                  type: text
+              - column:
+                  name: refund_reference
+                  type: varchar(255)
+              - column:
+                  name: created_at
+                  type: timestamptz
+                  defaultValueComputed: now()
