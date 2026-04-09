@@ -88,6 +88,61 @@ public class PaystackService {
         }
     }
 
+    public PaystackVerifyResponse chargeAuthorization(String authorizationCode, String email,
+                                                       BigDecimal amount, String currency,
+                                                       String reference) {
+        PaymentGatewaySettingsEntity settings = getSettings();
+        long amountInSmallestUnit = amount.multiply(BigDecimal.valueOf(100)).longValueExact();
+
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("authorization_code", authorizationCode);
+        requestBody.put("email", email);
+        requestBody.put("amount", amountInSmallestUnit);
+        requestBody.put("currency", currency);
+        requestBody.put("reference", reference);
+
+        String responseBody = paystackRestClient.post()
+                .uri(settings.getBaseUrl() + "/transaction/charge_authorization")
+                .header("Authorization", "Bearer " + settings.getSecretKey())
+                .body(requestBody)
+                .retrieve()
+                .body(String.class);
+
+        try {
+            PaystackVerifyResponse response = objectMapper.readValue(responseBody, PaystackVerifyResponse.class);
+            log.info("Paystack charge_authorization - reference: {}, status: {}", reference, response.getData().getStatus());
+            return response;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse Paystack charge_authorization response", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> refundTransaction(String reference, BigDecimal amount) {
+        PaymentGatewaySettingsEntity settings = getSettings();
+
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("transaction", reference);
+        if (amount != null) {
+            requestBody.put("amount", amount.multiply(BigDecimal.valueOf(100)).longValueExact());
+        }
+
+        String responseBody = paystackRestClient.post()
+                .uri(settings.getBaseUrl() + "/refund")
+                .header("Authorization", "Bearer " + settings.getSecretKey())
+                .body(requestBody)
+                .retrieve()
+                .body(String.class);
+
+        try {
+            Map<String, Object> response = objectMapper.readValue(responseBody, Map.class);
+            log.info("Paystack refund - reference: {}, response status: {}", reference, response.get("status"));
+            return response;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to parse Paystack refund response", e);
+        }
+    }
+
     public boolean validateWebhookSignature(String payload, String signature) {
         try {
             PaymentGatewaySettingsEntity settings = getSettings();
