@@ -50,4 +50,34 @@ public class RabbitConfig {
                 .to(platformEventsExchange)
                 .with(PLATFORM_EVENTS_ROUTING_KEY);
     }
+
+    @Bean
+    public Queue billingEventsQueue() {
+        return QueueBuilder.durable("notification-service.billing-events").build();
+    }
+
+    @Bean
+    public Binding billingInvoiceBinding(Queue billingEventsQueue, TopicExchange platformEventsExchange) {
+        return BindingBuilder.bind(billingEventsQueue).to(platformEventsExchange).with("invoice.*");
+    }
+
+    @Bean
+    public Binding billingPaymentBinding(Queue billingEventsQueue, TopicExchange platformEventsExchange) {
+        return BindingBuilder.bind(billingEventsQueue).to(platformEventsExchange).with("payment.*");
+    }
+
+    @Bean
+    public Binding billingSubSuspendedBinding(Queue billingEventsQueue, TopicExchange platformEventsExchange) {
+        return BindingBuilder.bind(billingEventsQueue).to(platformEventsExchange).with("subscription.suspended");
+    }
+
+    @Bean
+    public Binding billingSubExpiredBinding(Queue billingEventsQueue, TopicExchange platformEventsExchange) {
+        return BindingBuilder.bind(billingEventsQueue).to(platformEventsExchange).with("subscription.expired");
+    }
+
+    @Bean
+    public Binding billingAlertBinding(Queue billingEventsQueue, TopicExchange platformEventsExchange) {
+        return BindingBuilder.bind(billingEventsQueue).to(platformEventsExchange).with("consumer.alert_triggered");
+    }
 }

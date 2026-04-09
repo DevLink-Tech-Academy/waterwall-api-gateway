@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"/><title>Payment Confirmed</title></head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #28a745;">Payment Confirmed</h2>
+    <p>Hi,</p>
+    <p>Your payment for invoice <strong th:text="${invoiceId}">INV-001</strong> has been confirmed.</p>
+    <p>Amount: <strong th:text="${amount}">$0.00</strong></p>
+    <p>Thank you for your payment.</p>
+    <p style="color: #666; font-size: 12px;">This is an automated message from the API Gateway Platform.</p>
+</body>
+</html>

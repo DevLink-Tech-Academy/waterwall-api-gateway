@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"/><title>Invoice Generated</title></head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #333;">New Invoice</h2>
+    <p>Hi,</p>
+    <p>A new invoice has been generated for your account.</p>
+    <p>Invoice ID: <strong th:text="${invoiceId}">INV-001</strong></p>
+    <p>Amount: <strong th:text="${amount}">$0.00</strong></p>
+    <p>Billing Period: <span th:text="${period}">March 2026</span></p>
+    <p>Please review and pay your invoice from the billing dashboard.</p>
+    <p style="color: #666; font-size: 12px;">This is an automated message from the API Gateway Platform.</p>
+</body>
+</html>

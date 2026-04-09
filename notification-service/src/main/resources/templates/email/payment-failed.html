@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"/><title>Payment Failed</title></head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h2 style="color: #cc0000;">Payment Failed</h2>
+    <p>Hi,</p>
+    <p>We were unable to process your payment for invoice <strong th:text="${invoiceId}">INV-001</strong>.</p>
+    <p>We will automatically retry the payment. Please ensure your payment method is up to date.</p>
+    <p>If payment continues to fail, your subscription may be suspended.</p>
+    <p style="color: #666; font-size: 12px;">This is an automated message from the API Gateway Platform.</p>
+</body>
+</html>

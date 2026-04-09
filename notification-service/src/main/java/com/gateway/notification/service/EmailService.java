@@ -65,6 +65,10 @@ public class EmailService {
             case "subscription-approved" -> "Your subscription has been approved";
             case "api-key-expiring" -> "Your API key is expiring soon";
             case "account-locked" -> "Your account has been locked";
+            case "invoice-generated" -> "New Invoice Generated";
+            case "payment-failed" -> "Payment Failed - Action Required";
+            case "payment-success" -> "Payment Confirmed";
+            case "subscription-suspended" -> "Subscription Suspended";
             default -> "API Gateway Notification";
         };
     }
