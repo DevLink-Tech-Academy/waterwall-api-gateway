@@ -58,12 +58,12 @@ public class BillingEventsConsumer {
             String invoiceId = event.get("invoiceId") != null ? event.get("invoiceId").toString() : null;
 
             if (eventType == null || consumerId == null) {
-                log.warn("Billing event missing required fields: {}", message);
+                log.warn("Billing event missing required fields: {}", content);
                 return;
             }
 
             String title = EVENT_TITLE_MAP.getOrDefault(eventType, "Billing Event");
-            String body = buildBody(eventType, invoiceId);
+            String notificationBody = buildBody(eventType, invoiceId);
 
             UUID userId;
             try {
@@ -76,7 +76,7 @@ public class BillingEventsConsumer {
             NotificationEntity notification = new NotificationEntity();
             notification.setUserId(userId);
             notification.setTitle(title);
-            notification.setBody(body);
+            notification.setBody(notificationBody);
             notification.setType("BILLING");
             notification.setRead(false);
             notificationRepository.save(notification);
