@@ -24,6 +24,36 @@ public class PostgresRequestLogStore implements RequestLogStore {
     private final JdbcTemplate jdbcTemplate;
     private final RequestLogRepository requestLogRepository;
 
+    /**
+     * Allowlist of safe interval values. Any user-supplied interval must match
+     * one of these patterns. This prevents SQL injection via the INTERVAL clause.
+     */
+    private static final Map<String, String> INTERVAL_ALLOWLIST = Map.ofEntries(
+            Map.entry("1h", "1 hour"), Map.entry("6h", "6 hours"), Map.entry("12h", "12 hours"),
+            Map.entry("24h", "24 hours"), Map.entry("48h", "48 hours"),
+            Map.entry("7d", "7 days"), Map.entry("14d", "14 days"), Map.entry("30d", "30 days"),
+            Map.entry("60d", "60 days"), Map.entry("90d", "90 days"), Map.entry("180d", "180 days"),
+            Map.entry("365d", "365 days"),
+            Map.entry("1 hour", "1 hour"), Map.entry("6 hours", "6 hours"), Map.entry("12 hours", "12 hours"),
+            Map.entry("24 hours", "24 hours"), Map.entry("48 hours", "48 hours"),
+            Map.entry("7 days", "7 days"), Map.entry("14 days", "14 days"), Map.entry("30 days", "30 days"),
+            Map.entry("60 days", "60 days"), Map.entry("90 days", "90 days"), Map.entry("180 days", "180 days"),
+            Map.entry("365 days", "365 days")
+    );
+
+    private static String sanitizeInterval(String interval) {
+        if (interval == null || interval.isBlank()) return "24 hours";
+        String key = interval.trim().toLowerCase();
+        String safe = INTERVAL_ALLOWLIST.get(key);
+        if (safe != null) return safe;
+        // Try to parse as "<number> <unit>" pattern strictly
+        if (key.matches("^\\d{1,4}\\s*(hours?|days?|minutes?)$")) {
+            return key;
+        }
+        log.warn("Rejected unsafe interval value: '{}', defaulting to '24 hours'", interval);
+        return "24 hours";
+    }
+
     // ── Ingest ──────────────────────────────────────────────────────────
 
     @Override
@@ -46,7 +76,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
                 COUNT(DISTINCT api_id) AS active_apis
             FROM analytics.request_logs
             WHERE created_at >= NOW() - INTERVAL '%s'
-            """.formatted(interval);
+            """.formatted(sanitizeInterval(interval));
 
         Map<String, Object> stats = jdbcTemplate.queryForMap(sql);
 
@@ -76,7 +106,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
             WHERE created_at >= NOW() - INTERVAL '%s'
             GROUP BY status_code / 100
             ORDER BY status_group
-            """.formatted(interval);
+            """.formatted(sanitizeInterval(interval));
 
         Map<String, Long> statusCodeBreakdown = new LinkedHashMap<>();
         jdbcTemplate.query(breakdownSql, (rs, rowNum) -> {
@@ -112,7 +142,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
             GROUP BY r.api_id, a.name
             ORDER BY %s
             LIMIT ?
-            """.formatted(interval, orderBy);
+            """.formatted(sanitizeInterval(interval), orderBy);
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> TopApiEntry.builder()
                 .apiId(rs.getObject("api_id", UUID.class))
@@ -140,7 +170,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
             GROUP BY r.consumer_id, u.email
             ORDER BY request_count DESC
             LIMIT ?
-            """.formatted(interval);
+            """.formatted(sanitizeInterval(interval));
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> TopConsumerEntry.builder()
                 .consumerId(rs.getObject("consumer_id", UUID.class))
@@ -162,7 +192,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
                 PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY latency_ms) AS p99
             FROM analytics.request_logs
             WHERE created_at >= NOW() - INTERVAL '%s'
-            """.formatted(interval);
+            """.formatted(sanitizeInterval(interval));
 
         Map<String, Object> row = jdbcTemplate.queryForMap(sql);
 
@@ -212,7 +242,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
               AND created_at >= NOW() - INTERVAL '%s'
             GROUP BY api_id
             ORDER BY total_requests DESC
-            """.formatted(placeholders, interval);
+            """.formatted(placeholders, sanitizeInterval(interval));
 
         Object[] params = apiIds.toArray();
 
@@ -249,7 +279,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
             FROM analytics.request_logs
             WHERE api_id = ?
               AND created_at >= NOW() - INTERVAL '%s'
-            """.formatted(interval);
+            """.formatted(sanitizeInterval(interval));
 
         Map<String, Object> stats = jdbcTemplate.queryForMap(sql, apiId);
 
@@ -263,7 +293,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
               AND created_at >= NOW() - INTERVAL '%s'
             GROUP BY status_code / 100
             ORDER BY status_group
-            """.formatted(interval);
+            """.formatted(sanitizeInterval(interval));
 
         Map<String, Long> statusCodeBreakdown = new LinkedHashMap<>();
         jdbcTemplate.query(breakdownSql, (rs, rowNum) -> {
@@ -353,19 +383,19 @@ public class PostgresRequestLogStore implements RequestLogStore {
                 ) AS value
                 FROM analytics.request_logs
                 WHERE created_at >= NOW() - INTERVAL '%s' AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(interval, apiFilter);
+                """.formatted(sanitizeInterval(interval), apiFilter);
 
             case "avg_latency" -> """
                 SELECT COALESCE(AVG(latency_ms), 0) AS value
                 FROM analytics.request_logs
                 WHERE created_at >= NOW() - INTERVAL '%s' AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(interval, apiFilter);
+                """.formatted(sanitizeInterval(interval), apiFilter);
 
             case "request_count", "requests_per_min" -> """
                 SELECT COUNT(*) AS value
                 FROM analytics.request_logs
                 WHERE created_at >= NOW() - INTERVAL '%s' AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(interval, apiFilter);
+                """.formatted(sanitizeInterval(interval), apiFilter);
 
             case "p99_latency", "latency_p99" -> """
                 SELECT COALESCE(
@@ -374,7 +404,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
                 ) AS value
                 FROM analytics.request_logs
                 WHERE created_at >= NOW() - INTERVAL '%s' AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(interval, apiFilter);
+                """.formatted(sanitizeInterval(interval), apiFilter);
 
             case "uptime" -> """
                 SELECT COALESCE(
@@ -384,7 +414,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
                 FROM analytics.request_logs
                 WHERE created_at >= NOW() - INTERVAL '%s'
                   AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(interval, apiFilter);
+                """.formatted(sanitizeInterval(interval), apiFilter);
 
             case "latency_p95" -> """
                 SELECT COALESCE(
@@ -394,7 +424,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
                 FROM analytics.request_logs
                 WHERE created_at >= NOW() - INTERVAL '%s'
                   AND (mock_mode IS NULL OR mock_mode = false)%s
-                """.formatted(interval, apiFilter);
+                """.formatted(sanitizeInterval(interval), apiFilter);
 
             default -> {
                 log.warn("Unknown metric: {}", metric);
@@ -468,7 +498,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
                 ) AS error_rate
             FROM analytics.request_logs
             WHERE created_at >= NOW() - INTERVAL '%s'
-            """.formatted(interval);
+            """.formatted(sanitizeInterval(interval));
         return jdbcTemplate.queryForMap(sql);
     }
 
@@ -489,7 +519,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
             GROUP BY api_id
             ORDER BY request_count DESC
             LIMIT ?
-            """.formatted(interval);
+            """.formatted(sanitizeInterval(interval));
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -515,7 +545,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
             GROUP BY status_code, error_code
             ORDER BY cnt DESC
             LIMIT ?
-            """.formatted(interval);
+            """.formatted(sanitizeInterval(interval));
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -541,7 +571,7 @@ public class PostgresRequestLogStore implements RequestLogStore {
             GROUP BY api_id
             HAVING AVG(latency_ms) > 1000
                OR (COUNT(*) FILTER (WHERE status_code >= 400) * 100.0 / NULLIF(COUNT(*), 0)) > 5
-            """.formatted(interval);
+            """.formatted(sanitizeInterval(interval));
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             Map<String, Object> row = new LinkedHashMap<>();

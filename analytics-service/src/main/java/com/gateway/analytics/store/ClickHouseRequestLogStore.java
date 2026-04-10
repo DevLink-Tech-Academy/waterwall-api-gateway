@@ -616,33 +616,37 @@ public class ClickHouseRequestLogStore implements RequestLogStore {
         if (pgInterval == null) return "24 HOUR";
         String lower = pgInterval.toLowerCase().trim();
 
-        if (lower.endsWith("hours") || lower.endsWith("hour")) {
-            String num = lower.split("\\s+")[0];
-            return num + " HOUR";
-        } else if (lower.endsWith("days") || lower.endsWith("day")) {
-            String num = lower.split("\\s+")[0];
-            return num + " DAY";
-        } else if (lower.endsWith("minutes") || lower.endsWith("minute")) {
-            String num = lower.split("\\s+")[0];
-            return num + " MINUTE";
-        } else if (lower.endsWith("seconds") || lower.endsWith("second")) {
-            String num = lower.split("\\s+")[0];
-            return num + " SECOND";
-        } else if (lower.endsWith("weeks") || lower.endsWith("week")) {
-            String num = lower.split("\\s+")[0];
-            return num + " WEEK";
-        } else if (lower.endsWith("months") || lower.endsWith("month")) {
-            String num = lower.split("\\s+")[0];
-            return num + " MONTH";
+        // Validate numeric prefix to prevent SQL injection
+        java.util.Map<String, String> unitMap = java.util.Map.of(
+                "hour", "HOUR", "hours", "HOUR",
+                "day", "DAY", "days", "DAY",
+                "minute", "MINUTE", "minutes", "MINUTE",
+                "second", "SECOND", "seconds", "SECOND",
+                "week", "WEEK", "month", "MONTH"
+        );
+
+        for (var entry : unitMap.entrySet()) {
+            if (lower.endsWith(entry.getKey())) {
+                String num = lower.split("\\s+")[0];
+                if (num.matches("\\d{1,4}")) {
+                    return num + " " + entry.getValue();
+                }
+                return "24 HOUR"; // Invalid number
+            }
         }
 
         // Handle shorthand
         return switch (lower) {
             case "1h" -> "1 HOUR";
             case "6h" -> "6 HOUR";
+            case "12h" -> "12 HOUR";
             case "24h" -> "24 HOUR";
+            case "48h" -> "48 HOUR";
             case "7d" -> "7 DAY";
+            case "14d" -> "14 DAY";
             case "30d" -> "30 DAY";
+            case "60d" -> "60 DAY";
+            case "90d" -> "90 DAY";
             default -> "24 HOUR";
         };
     }
