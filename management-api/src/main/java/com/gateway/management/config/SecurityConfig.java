@@ -34,7 +34,7 @@ public class SecurityConfig {
     @Value("${gateway.cors.allowed-origins:http://localhost:3000,http://localhost:3001}")
     private List<String> allowedOrigins;
 
-    @Value("${gateway.cors.allowed-methods:GET,POST,PUT,DELETE,OPTIONS}")
+    @Value("${gateway.cors.allowed-methods:GET,POST,PUT,PATCH,DELETE,OPTIONS}")
     private List<String> allowedMethods;
 
     @Value("${gateway.cors.allowed-headers:Authorization,Content-Type,X-API-Key,X-Trace-Id}")
