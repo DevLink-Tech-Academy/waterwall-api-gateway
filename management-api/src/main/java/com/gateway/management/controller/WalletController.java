@@ -88,10 +88,17 @@ public class WalletController {
     }
 
     @GetMapping("/transactions")
-    public ResponseEntity<Page<WalletTransactionEntity>> getTransactions(
+    public ResponseEntity<Map<String, Object>> getTransactions(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(walletService.getTransactions(PageRequest.of(page, size)));
+        Page<WalletTransactionEntity> result = walletService.getTransactions(PageRequest.of(page, size));
+        Map<String, Object> response = new java.util.LinkedHashMap<>();
+        response.put("content", result.getContent());
+        response.put("totalElements", result.getTotalElements());
+        response.put("totalPages", result.getTotalPages());
+        response.put("page", result.getNumber());
+        response.put("size", result.getSize());
+        return ResponseEntity.ok(response);
     }
 
     @PutMapping("/settings")
