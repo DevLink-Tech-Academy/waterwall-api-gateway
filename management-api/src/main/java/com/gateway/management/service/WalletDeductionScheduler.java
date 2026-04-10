@@ -88,29 +88,50 @@ public class WalletDeductionScheduler {
                 long requestCount = countRequests(appId, since, now);
                 if (requestCount == 0) continue;
 
-                BigDecimal perRequestRate = resolvePerRequestRate(consumerSubs);
-                if (perRequestRate == null || perRequestRate.signum() <= 0) continue;
+                // Resolve the plan for cost calculation
+                PlanEntity plan = resolvePlan(consumerSubs);
+                if (plan == null) continue;
 
-                long freeRequests = resolveFreeRequests(consumerSubs);
+                String model = plan.getPricingModel() != null ? plan.getPricingModel().toUpperCase() : "FREE";
+
+                // FREE plans never charge
+                if ("FREE".equals(model)) continue;
+
+                // FLAT_RATE in PAY_AS_YOU_GO doesn't make sense — skip
+                // (flat rate is a subscription concept, not per-request)
+                if ("FLAT_RATE".equals(model)) continue;
+
+                // For PAY_PER_USE, TIERED, FREEMIUM — calculate cost using PricingCalculator
+                // But we need incremental cost (just this window's requests), not total month
                 long monthlyUsage = countMonthlyRequests(appId);
-                long usageBeforeThisWindow = monthlyUsage - requestCount;
-                long freeRemaining = Math.max(0, freeRequests - usageBeforeThisWindow);
-                long billableRequests = Math.max(0, requestCount - freeRemaining);
+                long usageBefore = monthlyUsage - requestCount;
 
-                if (billableRequests <= 0) {
-                    log.debug("App {} has {} requests, within free tier ({} included)", appId, requestCount, freeRequests);
-                    continue;
+                // Calculate cost for total monthly usage vs cost before this window
+                // The difference is what this window costs
+                BigDecimal costTotal = PricingCalculator.calculateCost(plan, monthlyUsage);
+                BigDecimal costBefore = PricingCalculator.calculateCost(plan, usageBefore);
+
+                // For TIERED model, subtract the base fee from both since it's a subscription charge
+                if ("TIERED".equals(model)) {
+                    BigDecimal baseFee = plan.getPriceAmount() != null ? plan.getPriceAmount() : BigDecimal.ZERO;
+                    costTotal = costTotal.subtract(baseFee);
+                    costBefore = costBefore.subtract(baseFee);
                 }
 
-                BigDecimal cost = perRequestRate.multiply(BigDecimal.valueOf(billableRequests))
+                BigDecimal cost = costTotal.subtract(costBefore).max(BigDecimal.ZERO)
                         .setScale(2, RoundingMode.HALF_UP);
 
                 if (cost.signum() <= 0) continue;
 
+                BigDecimal perRequestRate = plan.getOverageRate() != null ? plan.getOverageRate() : BigDecimal.ZERO;
+                long billableRequests = perRequestRate.signum() > 0
+                        ? cost.divide(perRequestRate, 0, RoundingMode.HALF_UP).longValue()
+                        : requestCount;
+
                 // Deduct from the user's wallet, not the app's
                 walletService.deduct(walletOwnerId, cost,
                         "USAGE-" + now.toEpochMilli(),
-                        billableRequests + " API requests @ " + perRequestRate + "/req",
+                        billableRequests + " API requests @ " + perRequestRate + "/req (" + model + ")",
                         null);
                 deducted++;
 
@@ -161,24 +182,26 @@ public class WalletDeductionScheduler {
         }
     }
 
-    private BigDecimal resolvePerRequestRate(List<SubscriptionEntity> subs) {
+    private PlanEntity resolvePlan(List<SubscriptionEntity> subs) {
+        // Prefer a plan with an overage rate set (i.e. a paid plan)
         for (SubscriptionEntity sub : subs) {
             PlanEntity plan = sub.getPlan();
             if (plan != null && plan.getOverageRate() != null && plan.getOverageRate().signum() > 0) {
-                return plan.getOverageRate();
+                return plan;
             }
         }
-        return null;
-    }
-
-    private long resolveFreeRequests(List<SubscriptionEntity> subs) {
+        // Fall back to any non-free plan
         for (SubscriptionEntity sub : subs) {
             PlanEntity plan = sub.getPlan();
-            if (plan != null && plan.getIncludedRequests() != null) {
-                return plan.getIncludedRequests();
+            if (plan != null && !"FREE".equalsIgnoreCase(plan.getPricingModel())) {
+                return plan;
             }
         }
-        return 0;
+        // Last resort: any plan
+        for (SubscriptionEntity sub : subs) {
+            if (sub.getPlan() != null) return sub.getPlan();
+        }
+        return null;
     }
 
     /**
