@@ -403,14 +403,18 @@ export default function MonetizationPage() {
   }, []);
 
   /* ============================================================== */
+  /*  BILLING MODE state                                              */
+  /* ============================================================== */
+  // Platform billing mode
+  const [billingMode, setBillingMode] = useState<'SUBSCRIPTION' | 'PAY_AS_YOU_GO'>('SUBSCRIPTION');
+  const [billingModeLoading, setBillingModeLoading] = useState(false);
+
+  /* ============================================================== */
   /*  WALLETS state                                                    */
   /* ============================================================== */
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [walletsLoading, setWalletsLoading] = useState(true);
   const [walletsError, setWalletsError] = useState('');
-  const [creditModal, setCreditModal] = useState(false);
-  const [creditForm, setCreditForm] = useState({ consumerId: '', amount: '', description: '' });
-  const [crediting, setCrediting] = useState(false);
 
   const fetchWallets = useCallback(async () => {
     setWalletsLoading(true);
@@ -427,24 +431,34 @@ export default function MonetizationPage() {
     }
   }, []);
 
-  const handleCreditWallet = async () => {
-    if (!creditForm.consumerId || !creditForm.amount) return;
-    setCrediting(true);
+  const fetchBillingMode = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/v1/monetization/wallets/${creditForm.consumerId}/credit`, {
-        method: 'POST',
+      const res = await fetch(`${API_URL}/v1/platform-settings/billing-mode`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setBillingMode(data.billingMode || 'SUBSCRIPTION');
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  const toggleBillingMode = async (mode: 'SUBSCRIPTION' | 'PAY_AS_YOU_GO') => {
+    setBillingModeLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/v1/platform-settings/billing-mode`, {
+        method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ amount: creditForm.amount, description: creditForm.description || 'Admin credit' }),
+        body: JSON.stringify({ billingMode: mode }),
       });
-      if (!res.ok) throw new Error('Credit failed');
-      showToast('Wallet credited successfully');
-      setCreditModal(false);
-      setCreditForm({ consumerId: '', amount: '', description: '' });
-      fetchWallets();
+      if (res.ok) {
+        setBillingMode(mode);
+        showToast(`Billing mode switched to ${mode === 'SUBSCRIPTION' ? 'Subscription' : 'Pay As You Go'}`);
+      } else {
+        showToast('Failed to update billing mode', 'error');
+      }
     } catch {
-      showToast('Failed to credit wallet', 'error');
+      showToast('Failed to update billing mode', 'error');
     } finally {
-      setCrediting(false);
+      setBillingModeLoading(false);
     }
   };
 
@@ -452,11 +466,12 @@ export default function MonetizationPage() {
   /*  Data loading on tab change                                      */
   /* ============================================================== */
   useEffect(() => {
+    fetchBillingMode();
     if (activeTab === 'plans') fetchPlans();
     else if (activeTab === 'invoices') fetchInvoices();
     else if (activeTab === 'revenue') fetchRevenue(revenuePeriod);
     else if (activeTab === 'wallets') fetchWallets();
-  }, [activeTab, fetchPlans, fetchInvoices, fetchRevenue, revenuePeriod, fetchWallets]);
+  }, [activeTab, fetchPlans, fetchInvoices, fetchRevenue, revenuePeriod, fetchWallets, fetchBillingMode]);
 
   /* ============================================================== */
   /*  Shared style classes                                            */
@@ -570,6 +585,39 @@ export default function MonetizationPage() {
           Manage pricing plans, generate invoices, and track revenue across your API platform.
         </p>
       </div>
+
+        {/* Billing Mode Toggle */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">Platform Billing Mode</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Choose how developers are charged for API usage</p>
+            </div>
+            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+              <button
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${billingMode === 'SUBSCRIPTION' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                onClick={() => toggleBillingMode('SUBSCRIPTION')}
+                disabled={billingModeLoading}
+              >
+                Subscription
+              </button>
+              <button
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${billingMode === 'PAY_AS_YOU_GO' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                onClick={() => toggleBillingMode('PAY_AS_YOU_GO')}
+                disabled={billingModeLoading}
+              >
+                Pay As You Go
+              </button>
+            </div>
+          </div>
+          <div className="mt-3 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+            {billingMode === 'SUBSCRIPTION' ? (
+              <span><strong>Subscription mode:</strong> Developers pay fixed monthly/quarterly/annual invoices. Auto-charge with saved cards. Dunning for failed payments.</span>
+            ) : (
+              <span><strong>Pay As You Go mode:</strong> Developers top up a prepaid wallet. Usage is deducted automatically based on per-request rates. API access blocked when wallet is empty.</span>
+            )}
+          </div>
+        </div>
 
       {/* Tabs */}
       <div className="border-b border-slate-200">
@@ -1221,14 +1269,14 @@ export default function MonetizationPage() {
       {activeTab === 'wallets' && (
         <>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-slate-900">Developer Wallets</h2>
-            <button
-              className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
-              onClick={() => setCreditModal(true)}
-            >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              Credit Wallet
-            </button>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Developer Wallets</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {billingMode === 'PAY_AS_YOU_GO'
+                  ? 'Wallets are active — developers top up and usage is deducted automatically'
+                  : 'Wallets are inactive in Subscription mode. Switch to Pay As You Go to enable.'}
+              </p>
+            </div>
           </div>
 
           {walletsError && (
@@ -1243,21 +1291,25 @@ export default function MonetizationPage() {
             <div className="text-center py-12">
               <div className="text-4xl mb-3">{'\u{1F4B0}'}</div>
               <h3 className="text-sm font-semibold text-slate-800">No wallets yet</h3>
-              <p className="text-xs text-slate-500 mt-1">Developer wallets will appear here when they top up for the first time.</p>
+              <p className="text-xs text-slate-500 mt-1">Developer wallets appear here when they top up for the first time.</p>
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-500">{wallets.length} wallet{wallets.length !== 1 ? 's' : ''}</span>
+                <span className="text-xs font-medium text-slate-500">
+                  Total balance: {fmtCurrency(wallets.reduce((sum, w) => sum + w.balance, 0), wallets[0]?.currency || 'NGN')}
+                </span>
+              </div>
               <table className="w-full">
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-100">
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Consumer ID</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Consumer</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Balance</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Currency</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Auto Top-Up</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Threshold</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Top-Up Amt</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Low Balance</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Actions</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Low Alert</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1265,63 +1317,18 @@ export default function MonetizationPage() {
                     <tr key={w.id} className="border-b border-slate-50 hover:bg-slate-50/50">
                       <td className="px-4 py-3 text-sm font-mono text-slate-600">{w.consumerId.substring(0, 8)}...</td>
                       <td className="px-4 py-3 text-sm text-right font-semibold text-slate-900">{fmtCurrency(w.balance, w.currency)}</td>
-                      <td className="px-4 py-3 text-sm text-center"><span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600">{w.currency}</span></td>
                       <td className="px-4 py-3 text-sm text-center">
                         <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${w.autoTopUpEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                          {w.autoTopUpEnabled ? 'Enabled' : 'Disabled'}
+                          {w.autoTopUpEnabled ? 'On' : 'Off'}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-right text-slate-600">{w.autoTopUpThreshold ? fmtCurrency(w.autoTopUpThreshold, w.currency) : '-'}</td>
                       <td className="px-4 py-3 text-sm text-right text-slate-600">{w.autoTopUpAmount ? fmtCurrency(w.autoTopUpAmount, w.currency) : '-'}</td>
                       <td className="px-4 py-3 text-sm text-right text-slate-600">{w.lowBalanceThreshold ? fmtCurrency(w.lowBalanceThreshold, w.currency) : '-'}</td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
-                          onClick={() => { setCreditForm({ consumerId: w.consumerId, amount: '', description: '' }); setCreditModal(true); }}
-                        >Credit</button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-          )}
-
-          {/* Credit Wallet Modal */}
-          {creditModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-                <h3 className="text-lg font-bold text-slate-900 mb-4">Credit Developer Wallet</h3>
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Consumer ID</label>
-                    <input className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-                      value={creditForm.consumerId} placeholder="UUID of the developer"
-                      onChange={e => setCreditForm(f => ({ ...f, consumerId: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Amount</label>
-                    <input type="number" className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-                      value={creditForm.amount} placeholder="e.g. 5000"
-                      onChange={e => setCreditForm(f => ({ ...f, amount: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                    <input className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-                      value={creditForm.description} placeholder="Reason for credit"
-                      onChange={e => setCreditForm(f => ({ ...f, description: e.target.value }))} />
-                  </div>
-                </div>
-                <div className="flex justify-end gap-3 mt-6">
-                  <button className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
-                    onClick={() => setCreditModal(false)}>Cancel</button>
-                  <button
-                    className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-                    disabled={crediting || !creditForm.consumerId || !creditForm.amount}
-                    onClick={handleCreditWallet}
-                  >{crediting ? 'Processing...' : 'Credit Wallet'}</button>
-                </div>
-              </div>
             </div>
           )}
         </>
