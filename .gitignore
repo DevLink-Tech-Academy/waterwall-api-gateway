@@ -60,3 +60,6 @@ docs/
 website/
 scripts/
 tsconfig.tsbuildinfo
+.gitnexus
+AGENTS.md
+CLAUDE.md
