@@ -1,0 +1,76 @@
+databaseChangeLog:
+  - changeSet:
+      id: gw-046-generalize-payment-methods
+      author: gateway-team
+      comment: Add provider-agnostic token fields to payment_methods
+      changes:
+        - addColumn:
+            schemaName: gateway
+            tableName: payment_methods
+            columns:
+              - column:
+                  name: authorization_token
+                  type: varchar(500)
+              - column:
+                  name: customer_token
+                  type: varchar(255)
+        - sql:
+            sql: |
+              UPDATE gateway.payment_methods
+              SET authorization_token = paystack_authorization_code,
+                  customer_token = paystack_customer_code
+              WHERE paystack_authorization_code IS NOT NULL;
+
+  - changeSet:
+      id: gw-046-generalize-invoices
+      author: gateway-team
+      comment: Add provider-agnostic payment reference fields to invoices
+      changes:
+        - addColumn:
+            schemaName: gateway
+            tableName: invoices
+            columns:
+              - column:
+                  name: payment_reference
+                  type: varchar(255)
+              - column:
+                  name: payment_provider
+                  type: varchar(50)
+        - sql:
+            sql: |
+              UPDATE gateway.invoices
+              SET payment_reference = paystack_reference,
+                  payment_provider = 'paystack'
+              WHERE paystack_reference IS NOT NULL;
+
+  - changeSet:
+      id: gw-046-seed-stripe-settings
+      author: gateway-team
+      changes:
+        - insert:
+            schemaName: gateway
+            tableName: payment_gateway_settings
+            columns:
+              - column: { name: provider, value: "stripe" }
+              - column: { name: display_name, value: "Stripe" }
+              - column: { name: enabled, valueBoolean: false }
+              - column: { name: environment, value: "test" }
+              - column: { name: base_url, value: "https://api.stripe.com" }
+              - column: { name: supported_currencies, value: "USD,EUR,GBP,NGN" }
+              - column: { name: default_currency, value: "NGN" }
+
+  - changeSet:
+      id: gw-046-seed-flutterwave-settings
+      author: gateway-team
+      changes:
+        - insert:
+            schemaName: gateway
+            tableName: payment_gateway_settings
+            columns:
+              - column: { name: provider, value: "flutterwave" }
+              - column: { name: display_name, value: "Flutterwave" }
+              - column: { name: enabled, valueBoolean: false }
+              - column: { name: environment, value: "test" }
+              - column: { name: base_url, value: "https://api.flutterwave.com/v3" }
+              - column: { name: supported_currencies, value: "NGN,USD,GHS,ZAR,KES" }
+              - column: { name: default_currency, value: "NGN" }

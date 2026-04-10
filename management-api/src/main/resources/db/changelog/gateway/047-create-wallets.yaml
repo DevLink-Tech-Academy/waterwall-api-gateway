@@ -1,0 +1,119 @@
+databaseChangeLog:
+  - changeSet:
+      id: gw-047-create-wallets
+      author: gateway-team
+      changes:
+        - createTable:
+            schemaName: gateway
+            tableName: wallets
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  defaultValueComputed: gen_random_uuid()
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: consumer_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+                    unique: true
+                    uniqueConstraintName: uk_wallet_consumer
+              - column:
+                  name: balance
+                  type: decimal(12,2)
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: currency
+                  type: varchar(10)
+                  defaultValue: "NGN"
+              - column:
+                  name: auto_top_up_enabled
+                  type: boolean
+                  defaultValueBoolean: false
+              - column:
+                  name: auto_top_up_threshold
+                  type: decimal(12,2)
+              - column:
+                  name: auto_top_up_amount
+                  type: decimal(12,2)
+              - column:
+                  name: low_balance_threshold
+                  type: decimal(12,2)
+              - column:
+                  name: created_at
+                  type: timestamptz
+                  defaultValueComputed: now()
+              - column:
+                  name: updated_at
+                  type: timestamptz
+                  defaultValueComputed: now()
+
+  - changeSet:
+      id: gw-047-create-wallet-transactions
+      author: gateway-team
+      changes:
+        - createTable:
+            schemaName: gateway
+            tableName: wallet_transactions
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  defaultValueComputed: gen_random_uuid()
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: wallet_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: type
+                  type: varchar(10)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: amount
+                  type: decimal(12,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: currency
+                  type: varchar(10)
+              - column:
+                  name: reference
+                  type: varchar(255)
+              - column:
+                  name: description
+                  type: varchar(500)
+              - column:
+                  name: balance_after
+                  type: decimal(12,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: related_invoice_id
+                  type: uuid
+              - column:
+                  name: created_at
+                  type: timestamptz
+                  defaultValueComputed: now()
+        - createIndex:
+            schemaName: gateway
+            tableName: wallet_transactions
+            indexName: idx_wallet_txn_wallet_created
+            columns:
+              - column: { name: wallet_id }
+              - column: { name: created_at, descending: true }
+        - addForeignKeyConstraint:
+            baseTableSchemaName: gateway
+            baseTableName: wallet_transactions
+            baseColumnNames: wallet_id
+            referencedTableSchemaName: gateway
+            referencedTableName: wallets
+            referencedColumnNames: id
+            constraintName: fk_wallet_txn_wallet
