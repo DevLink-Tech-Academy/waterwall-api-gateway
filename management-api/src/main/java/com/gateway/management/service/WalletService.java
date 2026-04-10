@@ -176,6 +176,15 @@ public class WalletService {
 
         BigDecimal amount = wallet.getPendingTopupAmount();
         if (amount == null || amount.signum() <= 0) {
+            // Check if this top-up was already completed (idempotency)
+            boolean alreadyProcessed = walletTransactionRepository
+                    .findByWalletIdOrderByCreatedAtDesc(wallet.getId(), org.springframework.data.domain.PageRequest.of(0, 10))
+                    .getContent().stream()
+                    .anyMatch(t -> reference.equals(t.getReference()));
+            if (alreadyProcessed) {
+                log.info("Top-up already processed for reference={}, returning current wallet", reference);
+                return wallet;
+            }
             throw new IllegalStateException("No pending top-up found for reference: " + reference);
         }
 
