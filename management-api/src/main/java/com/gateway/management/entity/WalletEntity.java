@@ -48,6 +48,12 @@ public class WalletEntity {
     @Column(name = "low_balance_threshold", precision = 12, scale = 2)
     private BigDecimal lowBalanceThreshold;
 
+    @Column(name = "pending_topup_amount", precision = 12, scale = 2)
+    private BigDecimal pendingTopupAmount;
+
+    @Column(name = "pending_topup_reference", length = 255)
+    private String pendingTopupReference;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;

@@ -36,12 +36,19 @@ public class WalletController {
     @PostMapping("/top-up")
     public ResponseEntity<PaymentInitResponse> topUp(@RequestBody Map<String, Object> request) {
         BigDecimal amount = new BigDecimal(request.get("amount").toString());
+        if (amount.signum() <= 0) {
+            throw new IllegalArgumentException("Top-up amount must be positive");
+        }
+
         String providerName = request.get("provider") != null ? request.get("provider").toString() : null;
         String email = SecurityContextHelper.getCurrentEmail();
         String userId = SecurityContextHelper.getCurrentUserId();
 
         String reference = "TOPUP-" + userId.substring(0, 8) + "-" + System.currentTimeMillis();
         WalletEntity wallet = walletService.getWallet();
+
+        // Store pending top-up so we know the amount on verify callback
+        walletService.setPendingTopup(UUID.fromString(userId), amount, reference);
 
         PaymentProvider provider = providerName != null
                 ? paymentProviderFactory.getProvider(providerName)
@@ -57,7 +64,6 @@ public class WalletController {
     @GetMapping("/top-up/verify")
     public ResponseEntity<WalletEntity> verifyTopUp(
             @RequestParam String reference,
-            @RequestParam BigDecimal amount,
             @RequestParam(required = false) String provider) {
         String userId = SecurityContextHelper.getCurrentUserId();
 
@@ -70,8 +76,13 @@ public class WalletController {
             throw new IllegalStateException("Top-up payment not successful. Status: " + result.getStatus());
         }
 
-        WalletEntity wallet = walletService.topUp(
-                UUID.fromString(userId), amount, reference, "Wallet top-up via " + paymentProvider.getProviderName());
+        // Credit wallet with the stored pending amount
+        WalletEntity wallet = walletService.completePendingTopup(UUID.fromString(userId), reference, paymentProvider.getProviderName());
+
+        // Save payment method if reusable
+        if (result.getAuthorizationCode() != null) {
+            walletService.savePaymentMethodFromTopup(UUID.fromString(userId), result, paymentProvider.getProviderName());
+        }
 
         return ResponseEntity.ok(wallet);
     }

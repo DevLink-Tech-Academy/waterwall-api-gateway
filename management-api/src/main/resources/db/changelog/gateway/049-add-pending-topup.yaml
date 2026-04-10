@@ -1,0 +1,15 @@
+databaseChangeLog:
+  - changeSet:
+      id: gw-049-add-pending-topup-amount
+      author: gateway-team
+      changes:
+        - addColumn:
+            schemaName: gateway
+            tableName: wallets
+            columns:
+              - column:
+                  name: pending_topup_amount
+                  type: decimal(12,2)
+              - column:
+                  name: pending_topup_reference
+                  type: varchar(255)

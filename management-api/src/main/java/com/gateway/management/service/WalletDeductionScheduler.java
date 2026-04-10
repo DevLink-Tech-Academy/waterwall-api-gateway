@@ -2,7 +2,6 @@ package com.gateway.management.service;
 
 import com.gateway.management.entity.PlanEntity;
 import com.gateway.management.entity.SubscriptionEntity;
-import com.gateway.management.entity.WalletEntity;
 import com.gateway.management.entity.enums.SubStatus;
 import com.gateway.management.repository.SubscriptionRepository;
 import com.gateway.management.repository.WalletRepository;
@@ -20,11 +19,6 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 
-/**
- * Runs at a configurable interval (default every 5 minutes).
- * In PAY_AS_YOU_GO mode, counts each consumer's API requests since the last deduction
- * and deducts the cost from their wallet based on the plan's per-request rate.
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -36,30 +30,42 @@ public class WalletDeductionScheduler {
     private final WalletService walletService;
     private final EntityManager entityManager;
 
-    /**
-     * Track the last deduction time per consumer to know the window for counting requests.
-     * In production this should be persisted, but for now in-memory with DB fallback.
-     */
     private volatile Instant lastRunTime = null;
 
-    @Scheduled(fixedDelayString = "#{@walletDeductionDelay}")
+    private static final int DEFAULT_INTERVAL_MINUTES = 5;
+
+    /**
+     * Runs every minute but only processes if enough time has passed
+     * based on the admin-configured interval. This allows dynamic interval
+     * changes without restart.
+     */
+    @Scheduled(fixedDelay = 60_000, initialDelay = 120_000)
     @Transactional
     public void deductUsage() {
         if (!platformSettingsService.isPayAsYouGoMode()) {
             return;
         }
 
+        int intervalMinutes = platformSettingsService.getWalletDeductionIntervalMinutes();
+        if (intervalMinutes <= 0) intervalMinutes = DEFAULT_INTERVAL_MINUTES;
+
         Instant now = Instant.now();
-        Instant since = lastRunTime != null ? lastRunTime : now.minus(
-                platformSettingsService.getWalletDeductionIntervalMinutes(), ChronoUnit.MINUTES);
+
+        // Skip if not enough time has passed since last run
+        if (lastRunTime != null) {
+            long minutesSinceLastRun = ChronoUnit.MINUTES.between(lastRunTime, now);
+            if (minutesSinceLastRun < intervalMinutes) {
+                return;
+            }
+        }
+
+        Instant since = lastRunTime != null ? lastRunTime : now.minus(intervalMinutes, ChronoUnit.MINUTES);
         lastRunTime = now;
 
-        log.debug("Wallet deduction running: window {} to {}", since, now);
+        log.debug("Wallet deduction running: window {} to {} (interval={}min)", since, now, intervalMinutes);
 
-        // Get all active subscriptions
         List<SubscriptionEntity> subscriptions = subscriptionRepository.findByStatus(SubStatus.APPROVED);
 
-        // Group by consumer (application_id) to aggregate across APIs
         Map<UUID, List<SubscriptionEntity>> byConsumer = new HashMap<>();
         for (SubscriptionEntity sub : subscriptions) {
             byConsumer.computeIfAbsent(sub.getApplicationId(), k -> new ArrayList<>()).add(sub);
@@ -71,18 +77,17 @@ public class WalletDeductionScheduler {
             List<SubscriptionEntity> consumerSubs = entry.getValue();
 
             try {
-                // Count requests in the time window for this consumer
                 long requestCount = countRequests(consumerId, since, now);
                 if (requestCount == 0) continue;
 
-                // Resolve the per-request rate from the plan
                 BigDecimal perRequestRate = resolvePerRequestRate(consumerSubs);
                 if (perRequestRate == null || perRequestRate.signum() <= 0) continue;
 
-                // Calculate free tier remaining (monthly)
                 long freeRequests = resolveFreeRequests(consumerSubs);
                 long monthlyUsage = countMonthlyRequests(consumerId);
-                long billableRequests = Math.max(0, requestCount - Math.max(0, freeRequests - (monthlyUsage - requestCount)));
+                long usageBeforeThisWindow = monthlyUsage - requestCount;
+                long freeRemaining = Math.max(0, freeRequests - usageBeforeThisWindow);
+                long billableRequests = Math.max(0, requestCount - freeRemaining);
 
                 if (billableRequests <= 0) continue;
 
@@ -91,7 +96,6 @@ public class WalletDeductionScheduler {
 
                 if (cost.signum() <= 0) continue;
 
-                // Deduct from wallet
                 walletService.deduct(consumerId, cost,
                         "USAGE-" + now.toEpochMilli(),
                         billableRequests + " API requests @ " + perRequestRate + "/req",
@@ -99,7 +103,6 @@ public class WalletDeductionScheduler {
                 deducted++;
 
             } catch (IllegalStateException e) {
-                // Insufficient balance — logged by WalletService, low balance alert already sent
                 log.warn("Wallet deduction failed for consumer={}: {}", consumerId, e.getMessage());
             } catch (Exception e) {
                 log.error("Wallet deduction error for consumer={}: {}", consumerId, e.getMessage());

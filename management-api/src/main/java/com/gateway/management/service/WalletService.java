@@ -3,8 +3,10 @@ package com.gateway.management.service;
 import com.gateway.common.auth.SecurityContextHelper;
 import com.gateway.common.events.EventPublisher;
 import com.gateway.common.events.RabbitMQExchanges;
-import com.gateway.management.entity.InvoiceEntity;
+import com.gateway.management.entity.PaymentMethodEntity;
 import com.gateway.management.entity.WalletEntity;
+import com.gateway.management.repository.PaymentMethodRepository;
+import com.gateway.management.service.payment.PaymentResult;
 import com.gateway.management.entity.WalletTransactionEntity;
 import com.gateway.management.repository.InvoiceRepository;
 import com.gateway.management.repository.WalletRepository;
@@ -28,7 +30,7 @@ public class WalletService {
 
     private final WalletRepository walletRepository;
     private final WalletTransactionRepository walletTransactionRepository;
-    private final InvoiceRepository invoiceRepository;
+    private final PaymentMethodRepository paymentMethodRepository;
     private final PaymentGatewaySettingsService paymentGatewaySettingsService;
     private final EventPublisher eventPublisher;
 
@@ -152,6 +154,59 @@ public class WalletService {
         return walletRepository.findByConsumerId(consumerId)
                 .map(WalletEntity::getBalance)
                 .orElse(BigDecimal.ZERO);
+    }
+
+    @Transactional
+    public void setPendingTopup(UUID consumerId, BigDecimal amount, String reference) {
+        WalletEntity wallet = getOrCreateWallet(consumerId);
+        wallet.setPendingTopupAmount(amount);
+        wallet.setPendingTopupReference(reference);
+        walletRepository.save(wallet);
+        log.debug("Pending top-up set: consumer={} amount={} reference={}", consumerId, amount, reference);
+    }
+
+    @Transactional
+    public WalletEntity completePendingTopup(UUID consumerId, String reference, String providerName) {
+        WalletEntity wallet = getOrCreateWallet(consumerId);
+
+        BigDecimal amount = wallet.getPendingTopupAmount();
+        if (amount == null || amount.signum() <= 0) {
+            throw new IllegalStateException("No pending top-up found for reference: " + reference);
+        }
+
+        // Verify reference matches
+        if (wallet.getPendingTopupReference() != null && !wallet.getPendingTopupReference().equals(reference)) {
+            log.warn("Top-up reference mismatch: expected={} got={}", wallet.getPendingTopupReference(), reference);
+        }
+
+        // Credit wallet
+        wallet = topUp(consumerId, amount, reference, "Wallet top-up via " + providerName);
+
+        // Clear pending
+        wallet.setPendingTopupAmount(null);
+        wallet.setPendingTopupReference(null);
+        walletRepository.save(wallet);
+
+        return wallet;
+    }
+
+    @Transactional
+    public void savePaymentMethodFromTopup(UUID consumerId, PaymentResult.VerifyResult result, String providerName) {
+        if (result.getAuthorizationCode() == null) return;
+
+        PaymentMethodEntity pm = PaymentMethodEntity.builder()
+                .consumerId(consumerId)
+                .type(result.getCardType() != null ? result.getCardType() : "card")
+                .provider(providerName)
+                .providerRef(result.getReference())
+                .isDefault(true)
+                .authorizationToken(result.getAuthorizationCode())
+                .customerToken(result.getCustomerCode())
+                .cardLast4(result.getCardLast4())
+                .cardBrand(result.getCardBrand())
+                .build();
+        paymentMethodRepository.save(pm);
+        log.info("Payment method saved from top-up: consumer={} provider={}", consumerId, providerName);
     }
 
     private void publishLowBalanceAlert(UUID consumerId, BigDecimal balance, BigDecimal threshold) {

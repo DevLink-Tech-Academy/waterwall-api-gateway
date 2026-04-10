@@ -1,5 +1,7 @@
 package com.gateway.management.service.payment;
 
+import com.gateway.management.config.FlutterwaveConfig;
+import com.gateway.management.repository.PaymentGatewaySettingsRepository;
 import com.gateway.management.service.FlutterwaveService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +17,8 @@ import java.util.UUID;
 public class FlutterwavePaymentProvider implements PaymentProvider {
 
     private final FlutterwaveService flutterwaveService;
+    private final FlutterwaveConfig flutterwaveConfig;
+    private final PaymentGatewaySettingsRepository settingsRepository;
 
     @Override
     public String getProviderName() { return "flutterwave"; }
@@ -24,9 +28,10 @@ public class FlutterwavePaymentProvider implements PaymentProvider {
     public PaymentResult.InitResult initializePayment(String email, BigDecimal amount,
                                                        String currency, String reference,
                                                        UUID invoiceId) {
+        String callbackUrl = flutterwaveConfig.resolveSettings(settingsRepository).getCallbackUrl();
+        if (callbackUrl == null || callbackUrl.isBlank()) callbackUrl = "http://localhost:3000/billing";
         Map<String, Object> response = flutterwaveService.createPaymentLink(
-                email, amount, currency, reference, invoiceId,
-                "http://localhost:3000/billing");
+                email, amount, currency, reference, invoiceId, callbackUrl);
 
         Map<String, Object> data = (Map<String, Object>) response.get("data");
         String paymentLink = data != null ? (String) data.get("link") : null;

@@ -31,11 +31,21 @@ public class BillingEventsConsumer {
             Map.entry("wallet.auto_topped_up", "Wallet Auto Top-Up")
     );
 
+    private static final Map<String, String> EVENT_EMAIL_TEMPLATE = Map.of(
+            "invoice.generated", "invoice-generated",
+            "invoice.paid", "payment-success",
+            "payment.failed", "payment-failed",
+            "subscription.suspended", "subscription-suspended"
+    );
+
     private final NotificationRepository notificationRepository;
+    private final EmailService emailService;
     private final ObjectMapper objectMapper;
 
-    public BillingEventsConsumer(NotificationRepository notificationRepository, ObjectMapper objectMapper) {
+    public BillingEventsConsumer(NotificationRepository notificationRepository,
+                                 EmailService emailService, ObjectMapper objectMapper) {
         this.notificationRepository = notificationRepository;
+        this.emailService = emailService;
         this.objectMapper = objectMapper;
     }
 
@@ -82,6 +92,16 @@ public class BillingEventsConsumer {
             notification.setType("BILLING");
             notification.setRead(false);
             notificationRepository.save(notification);
+
+            // Send email if a template exists for this event type
+            String emailTemplate = EVENT_EMAIL_TEMPLATE.get(eventType);
+            String email = event.get("email") != null ? event.get("email").toString() : null;
+            if (emailTemplate != null && email != null) {
+                emailService.sendEmail(email, emailTemplate, Map.of(
+                        "invoiceId", invoiceId != null ? invoiceId : "",
+                        "subject", title
+                ));
+            }
 
             log.info("Billing notification created: eventType={} userId={}", eventType, userId);
         } catch (Exception e) {

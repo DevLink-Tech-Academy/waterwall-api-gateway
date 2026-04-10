@@ -26,15 +26,20 @@ public class WalletAutoTopUpScheduler {
     private final WalletService walletService;
     private final PaymentMethodRepository paymentMethodRepository;
     private final PaymentProviderFactory paymentProviderFactory;
+    private final PlatformSettingsService platformSettingsService;
     private final EventPublisher eventPublisher;
 
     /**
-     * Runs every 30 minutes. Finds wallets where auto-top-up is enabled
-     * and balance is below threshold, then charges the saved card.
+     * Runs every 30 minutes. Only active in PAY_AS_YOU_GO mode.
+     * Finds wallets where auto-top-up is enabled and balance is below threshold.
      */
     @Scheduled(cron = "0 0/30 * * * *")
     @Transactional
     public void processAutoTopUps() {
+        if (!platformSettingsService.isPayAsYouGoMode()) {
+            return;
+        }
+
         List<WalletEntity> wallets = walletRepository.findWalletsNeedingTopUp();
 
         if (wallets.isEmpty()) {

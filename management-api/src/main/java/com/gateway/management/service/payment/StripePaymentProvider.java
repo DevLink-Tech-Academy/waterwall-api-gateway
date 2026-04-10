@@ -1,5 +1,7 @@
 package com.gateway.management.service.payment;
 
+import com.gateway.management.config.StripeConfig;
+import com.gateway.management.repository.PaymentGatewaySettingsRepository;
 import com.gateway.management.service.StripeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +17,8 @@ import java.util.UUID;
 public class StripePaymentProvider implements PaymentProvider {
 
     private final StripeService stripeService;
+    private final StripeConfig stripeConfig;
+    private final PaymentGatewaySettingsRepository settingsRepository;
 
     @Override
     public String getProviderName() { return "stripe"; }
@@ -23,9 +27,10 @@ public class StripePaymentProvider implements PaymentProvider {
     public PaymentResult.InitResult initializePayment(String email, BigDecimal amount,
                                                        String currency, String reference,
                                                        UUID invoiceId) {
+        String callbackUrl = stripeConfig.resolveSettings(settingsRepository).getCallbackUrl();
+        if (callbackUrl == null || callbackUrl.isBlank()) callbackUrl = "http://localhost:3000/billing";
         Map<String, Object> session = stripeService.createCheckoutSession(
-                email, amount, currency, reference, invoiceId,
-                "http://localhost:3000/billing");
+                email, amount, currency, reference, invoiceId, callbackUrl);
         return PaymentResult.InitResult.builder()
                 .authorizationUrl((String) session.get("url"))
                 .reference(reference)
