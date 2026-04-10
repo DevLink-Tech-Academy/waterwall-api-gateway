@@ -158,6 +158,9 @@ export default function BillingPage() {
   const [selectedGateway, setSelectedGateway] = useState('');
   const [pendingPayInvoiceId, setPendingPayInvoiceId] = useState<string | null>(null);
 
+  // Billing mode
+  const [billingMode, setBillingMode] = useState<'SUBSCRIPTION' | 'PAY_AS_YOU_GO'>('SUBSCRIPTION');
+
   // add payment method form
   const [showAddPm, setShowAddPm] = useState(false);
   const [pmForm, setPmForm] = useState({ type: 'CREDIT_CARD', provider: '', providerRef: '' });
@@ -210,6 +213,7 @@ export default function BillingPage() {
       ['payments', `${API_BASE}/v1/consumer/payment-methods`, (d) => setPaymentMethods(Array.isArray(d) ? d : [])],
       ['wallet', `${API_BASE}/v1/consumer/wallet`, (d) => setWallet(d as typeof wallet)],
       ['gateways', `${API_BASE}/v1/consumer/payment-gateways`, (d) => setEnabledGateways(Array.isArray(d) ? d : [])],
+      ['billingMode', `${API_BASE}/v1/consumer/billing-mode`, (d) => setBillingMode(((d as { billingMode: string }).billingMode as 'SUBSCRIPTION' | 'PAY_AS_YOU_GO') || 'SUBSCRIPTION')],
       ['walletTxns', `${API_BASE}/v1/consumer/wallet/transactions?size=10`, (d) => setWalletTxns(d as typeof walletTxns)],
     ];
 
@@ -590,8 +594,19 @@ export default function BillingPage() {
   return (
     <div style={{ maxWidth: 960 }}>
       <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>Billing &amp; Usage</h1>
-        <p style={{ fontSize: 14, color: '#64748b', margin: 0 }}>Manage your plan, view usage, and billing history</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#0f172a', margin: 0 }}>Billing &amp; Usage</h1>
+          <span style={{
+            padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 600,
+            backgroundColor: billingMode === 'PAY_AS_YOU_GO' ? '#dbeafe' : '#f0fdf4',
+            color: billingMode === 'PAY_AS_YOU_GO' ? '#2563eb' : '#16a34a',
+          }}>{billingMode === 'PAY_AS_YOU_GO' ? 'Pay As You Go' : 'Subscription'}</span>
+        </div>
+        <p style={{ fontSize: 14, color: '#64748b', margin: '4px 0 0' }}>
+          {billingMode === 'PAY_AS_YOU_GO'
+            ? 'Top up your wallet and pay per API request'
+            : 'Manage your plan, view usage, and billing history'}
+        </p>
       </div>
 
       {/* Payment verification banner */}
@@ -783,7 +798,9 @@ export default function BillingPage() {
         ) : null}
       </div>
 
-      {/* =========== 5. INVOICES =========== */}
+      {/* =========== 5. INVOICES (SUBSCRIPTION mode only) =========== */}
+      {billingMode === 'SUBSCRIPTION' && (
+      <>
       <div style={card}>
         <h2 style={sectionTitle}>Invoices</h2>
         {sectionErrors.invoices && errBox(sectionErrors.invoices)}
@@ -866,6 +883,9 @@ export default function BillingPage() {
             </div>
           )}
       </div>
+
+      </>
+      )}
 
       {/* =========== 6. PAYMENT METHODS =========== */}
       <div style={card}>
@@ -984,7 +1004,9 @@ export default function BillingPage() {
           )}
       </div>
 
-      {/* =========== 7. WALLET =========== */}
+      {/* =========== 7. WALLET (PAY_AS_YOU_GO mode only) =========== */}
+      {billingMode === 'PAY_AS_YOU_GO' && (
+      <>
       <div style={card}>
         <h2 style={sectionTitle}>Wallet</h2>
         {sectionErrors.wallet && errBox(sectionErrors.wallet)}
@@ -1148,6 +1170,9 @@ export default function BillingPage() {
           </div>
         ) : emptyState('\u{1F4B0}', 'No wallet yet', 'Your wallet will be created when you first top up.')}
       </div>
+
+      </>
+      )}
 
       {/* =========== GATEWAY PICKER MODAL =========== */}
       {showGatewayPicker && (
