@@ -66,37 +66,49 @@ public class WalletDeductionScheduler {
 
         List<SubscriptionEntity> subscriptions = subscriptionRepository.findByStatus(SubStatus.APPROVED);
 
-        Map<UUID, List<SubscriptionEntity>> byConsumer = new HashMap<>();
+        // Group subscriptions by app ID
+        Map<UUID, List<SubscriptionEntity>> byAppId = new HashMap<>();
         for (SubscriptionEntity sub : subscriptions) {
-            byConsumer.computeIfAbsent(sub.getApplicationId(), k -> new ArrayList<>()).add(sub);
+            byAppId.computeIfAbsent(sub.getApplicationId(), k -> new ArrayList<>()).add(sub);
         }
 
+        // Build app ID -> user ID mapping
+        Map<UUID, UUID> appToUser = resolveAppOwners(byAppId.keySet());
+
         int deducted = 0;
-        for (Map.Entry<UUID, List<SubscriptionEntity>> entry : byConsumer.entrySet()) {
-            UUID consumerId = entry.getKey();
+        for (Map.Entry<UUID, List<SubscriptionEntity>> entry : byAppId.entrySet()) {
+            UUID appId = entry.getKey();
             List<SubscriptionEntity> consumerSubs = entry.getValue();
 
+            // Resolve the wallet owner (user who owns this app)
+            UUID walletOwnerId = appToUser.getOrDefault(appId, appId);
+
             try {
-                long requestCount = countRequests(consumerId, since, now);
+                // Count requests for this app ID (that's what gets logged)
+                long requestCount = countRequests(appId, since, now);
                 if (requestCount == 0) continue;
 
                 BigDecimal perRequestRate = resolvePerRequestRate(consumerSubs);
                 if (perRequestRate == null || perRequestRate.signum() <= 0) continue;
 
                 long freeRequests = resolveFreeRequests(consumerSubs);
-                long monthlyUsage = countMonthlyRequests(consumerId);
+                long monthlyUsage = countMonthlyRequests(appId);
                 long usageBeforeThisWindow = monthlyUsage - requestCount;
                 long freeRemaining = Math.max(0, freeRequests - usageBeforeThisWindow);
                 long billableRequests = Math.max(0, requestCount - freeRemaining);
 
-                if (billableRequests <= 0) continue;
+                if (billableRequests <= 0) {
+                    log.debug("App {} has {} requests, within free tier ({} included)", appId, requestCount, freeRequests);
+                    continue;
+                }
 
                 BigDecimal cost = perRequestRate.multiply(BigDecimal.valueOf(billableRequests))
                         .setScale(2, RoundingMode.HALF_UP);
 
                 if (cost.signum() <= 0) continue;
 
-                walletService.deduct(consumerId, cost,
+                // Deduct from the user's wallet, not the app's
+                walletService.deduct(walletOwnerId, cost,
                         "USAGE-" + now.toEpochMilli(),
                         billableRequests + " API requests @ " + perRequestRate + "/req",
                         null);
@@ -167,5 +179,32 @@ public class WalletDeductionScheduler {
             }
         }
         return 0;
+    }
+
+    /**
+     * Maps application IDs to the user IDs that own them.
+     * Wallets are keyed by user ID, but request logs use app ID as consumer_id.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<UUID, UUID> resolveAppOwners(java.util.Set<UUID> appIds) {
+        Map<UUID, UUID> mapping = new HashMap<>();
+        if (appIds.isEmpty()) return mapping;
+
+        try {
+            List<Object[]> rows = entityManager.createNativeQuery(
+                    "SELECT id, user_id FROM identity.applications WHERE id IN (:appIds)"
+            ).setParameter("appIds", new ArrayList<>(appIds)).getResultList();
+
+            for (Object[] row : rows) {
+                UUID appId = (UUID) row[0];
+                UUID userId = (UUID) row[1];
+                if (userId != null) {
+                    mapping.put(appId, userId);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to resolve app owners: {}", e.getMessage());
+        }
+        return mapping;
     }
 }
