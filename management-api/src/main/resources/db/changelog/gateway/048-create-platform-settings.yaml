@@ -1,0 +1,53 @@
+databaseChangeLog:
+  - changeSet:
+      id: gw-048-create-platform-settings
+      author: gateway-team
+      changes:
+        - createTable:
+            schemaName: gateway
+            tableName: platform_settings
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  defaultValueComputed: gen_random_uuid()
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: setting_key
+                  type: varchar(100)
+                  constraints:
+                    nullable: false
+                    unique: true
+                    uniqueConstraintName: uk_platform_setting_key
+              - column:
+                  name: setting_value
+                  type: varchar(500)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: description
+                  type: varchar(500)
+              - column:
+                  name: updated_at
+                  type: timestamptz
+                  defaultValueComputed: now()
+
+  - changeSet:
+      id: gw-048-seed-platform-settings
+      author: gateway-team
+      changes:
+        - insert:
+            schemaName: gateway
+            tableName: platform_settings
+            columns:
+              - column: { name: setting_key, value: "billing_mode" }
+              - column: { name: setting_value, value: "SUBSCRIPTION" }
+              - column: { name: description, value: "Platform billing mode: SUBSCRIPTION or PAY_AS_YOU_GO" }
+        - insert:
+            schemaName: gateway
+            tableName: platform_settings
+            columns:
+              - column: { name: setting_key, value: "wallet_deduction_interval_minutes" }
+              - column: { name: setting_value, value: "5" }
+              - column: { name: description, value: "How often (in minutes) to deduct wallet balance based on API usage. Only applies in PAY_AS_YOU_GO mode." }

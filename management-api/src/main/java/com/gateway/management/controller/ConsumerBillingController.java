@@ -25,6 +25,7 @@ public class ConsumerBillingController {
     private final ConsumerBillingService consumerBillingService;
     private final PaymentFlowService paymentFlowService;
     private final com.gateway.management.service.payment.PaymentProviderFactory paymentProviderFactory;
+    private final com.gateway.management.service.PlatformSettingsService platformSettingsService;
 
     // ── Invoices ──────────────────────────────────────────────────────────
 
@@ -82,6 +83,14 @@ public class ConsumerBillingController {
     }
 
     // ── Payments ────────────────────────────────────────────────────────────
+
+    /**
+     * Returns the current platform billing mode (SUBSCRIPTION or PAY_AS_YOU_GO).
+     */
+    @GetMapping("/billing-mode")
+    public ResponseEntity<Map<String, String>> getBillingMode() {
+        return ResponseEntity.ok(Map.of("billingMode", platformSettingsService.getBillingMode()));
+    }
 
     /**
      * Returns the list of payment gateways enabled by the admin.
