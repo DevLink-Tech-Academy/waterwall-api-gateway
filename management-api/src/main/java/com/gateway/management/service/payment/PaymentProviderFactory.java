@@ -45,4 +45,19 @@ public class PaymentProviderFactory {
         if (provider == null) throw new IllegalArgumentException("Unknown payment provider: " + providerName);
         return provider;
     }
+
+    /**
+     * Returns a list of enabled payment gateways with their display names,
+     * for the developer to choose from at checkout.
+     */
+    public List<Map<String, String>> getEnabledProviders() {
+        return settingsRepository.findByEnabledTrue().stream()
+                .filter(s -> providers.containsKey(s.getProvider()))
+                .map(s -> Map.of(
+                        "provider", s.getProvider(),
+                        "displayName", s.getDisplayName(),
+                        "supportedCurrencies", s.getSupportedCurrencies() != null ? s.getSupportedCurrencies() : ""
+                ))
+                .collect(Collectors.toList());
+    }
 }

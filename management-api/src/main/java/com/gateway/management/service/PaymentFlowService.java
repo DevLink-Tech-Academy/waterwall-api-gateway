@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -31,10 +32,10 @@ public class PaymentFlowService {
     private final PaymentMethodRepository paymentMethodRepository;
     private final ObjectMapper objectMapper;
 
-    private static final Set<String> PAYABLE_STATUSES = Set.of("DRAFT", "SENT", "OVERDUE");
+    private static final Set<String> PAYABLE_STATUSES = Set.of("DRAFT", "SENT", "OVERDUE", "FAILED");
 
     @Transactional
-    public PaymentInitResponse initiateInvoicePayment(UUID invoiceId) {
+    public PaymentInitResponse initiateInvoicePayment(UUID invoiceId, String providerName) {
         String userId = SecurityContextHelper.getCurrentUserId();
         String email = SecurityContextHelper.getCurrentEmail();
 
@@ -53,29 +54,38 @@ public class PaymentFlowService {
             throw new IllegalStateException("Invoice status does not allow payment: " + invoice.getStatus());
         }
 
-        // If invoice already has a paystack reference, verify it first
-        if (invoice.getPaystackReference() != null) {
+        // If invoice already has a payment reference, verify it first
+        if (invoice.getPaymentReference() != null) {
             try {
-                PaymentProvider provider = paymentProviderFactory.getActiveProvider();
-                PaymentResult.VerifyResult existing = provider.verifyPayment(invoice.getPaystackReference());
+                PaymentProvider existingProvider = invoice.getPaymentProvider() != null
+                        ? paymentProviderFactory.getProvider(invoice.getPaymentProvider())
+                        : paymentProviderFactory.getActiveProvider();
+                PaymentResult.VerifyResult existing = existingProvider.verifyPayment(invoice.getPaymentReference());
                 if (existing.isSuccessful()) {
                     invoice.setStatus("PAID");
                     invoice.setPaidAt(Instant.now());
                     invoiceRepository.save(invoice);
-                    return new PaymentInitResponse(null, invoice.getPaystackReference(), null);
+                    return new PaymentInitResponse(null, invoice.getPaymentReference(), null);
                 }
             } catch (Exception e) {
                 log.warn("Failed to verify existing reference {}, generating new one",
-                        invoice.getPaystackReference(), e);
+                        invoice.getPaymentReference(), e);
             }
         }
 
+        // Resolve provider — use specified, or active default
+        PaymentProvider provider = providerName != null && !providerName.isBlank()
+                ? paymentProviderFactory.getProvider(providerName)
+                : paymentProviderFactory.getActiveProvider();
+
         String reference = "INV-" + invoiceId.toString().substring(0, 8) + "-" + System.currentTimeMillis();
 
-        PaymentProvider provider = paymentProviderFactory.getActiveProvider();
         PaymentResult.InitResult result = provider.initializePayment(
                 email, invoice.getTotalAmount(), invoice.getCurrency(), reference, invoiceId);
 
+        invoice.setPaymentReference(reference);
+        invoice.setPaymentProvider(provider.getProviderName());
+        // Keep legacy field for backwards compatibility
         invoice.setPaystackReference(reference);
         invoice.setStatus("PENDING");
         invoiceRepository.save(invoice);
@@ -83,17 +93,31 @@ public class PaymentFlowService {
         return new PaymentInitResponse(result.getAuthorizationUrl(), reference, result.getAccessCode());
     }
 
+    // Backwards-compatible overload
     @Transactional
-    public InvoiceEntity verifyPayment(String reference) {
-        PaymentProvider provider = paymentProviderFactory.getActiveProvider();
+    public PaymentInitResponse initiateInvoicePayment(UUID invoiceId) {
+        return initiateInvoicePayment(invoiceId, null);
+    }
+
+    @Transactional
+    public InvoiceEntity verifyPayment(String reference, String providerName) {
+        // Resolve provider — try from the invoice's stored provider, then param, then default
+        InvoiceEntity invoice = findInvoiceByReference(reference);
+
+        PaymentProvider provider;
+        if (invoice.getPaymentProvider() != null) {
+            provider = paymentProviderFactory.getProvider(invoice.getPaymentProvider());
+        } else if (providerName != null) {
+            provider = paymentProviderFactory.getProvider(providerName);
+        } else {
+            provider = paymentProviderFactory.getActiveProvider();
+        }
+
         PaymentResult.VerifyResult result = provider.verifyPayment(reference);
 
         if (!result.isSuccessful()) {
             throw new IllegalStateException("Payment not successful. Status: " + result.getStatus());
         }
-
-        InvoiceEntity invoice = invoiceRepository.findByPaystackReference(reference)
-                .orElseThrow(() -> new EntityNotFoundException("Invoice not found for reference: " + reference));
 
         invoice.setStatus("PAID");
         invoice.setPaidAt(Instant.now());
@@ -107,8 +131,11 @@ public class PaymentFlowService {
                     .provider(provider.getProviderName())
                     .providerRef(result.getReference())
                     .isDefault(true)
-                    .paystackAuthorizationCode(result.getAuthorizationCode())
-                    .paystackCustomerCode(result.getCustomerCode())
+                    .authorizationToken(result.getAuthorizationCode())
+                    .customerToken(result.getCustomerCode())
+                    // Legacy fields
+                    .paystackAuthorizationCode("paystack".equals(provider.getProviderName()) ? result.getAuthorizationCode() : null)
+                    .paystackCustomerCode("paystack".equals(provider.getProviderName()) ? result.getCustomerCode() : null)
                     .cardLast4(result.getCardLast4())
                     .cardBrand(result.getCardBrand())
                     .build();
@@ -119,6 +146,12 @@ public class PaymentFlowService {
         return invoiceRepository.save(invoice);
     }
 
+    // Backwards-compatible overload
+    @Transactional
+    public InvoiceEntity verifyPayment(String reference) {
+        return verifyPayment(reference, null);
+    }
+
     @Transactional
     @SuppressWarnings("unchecked")
     public void handleWebhookEvent(String eventType, Map<String, Object> data) {
@@ -126,12 +159,14 @@ public class PaymentFlowService {
             String reference = (String) data.get("reference");
             log.info("Processing charge.success webhook for reference: {}", reference);
 
-            invoiceRepository.findByPaystackReference(reference).ifPresent(invoice -> {
+            findInvoiceByReferenceOpt(reference).ifPresent(invoice -> {
                 if (!"PAID".equals(invoice.getStatus())) {
                     invoice.setStatus("PAID");
                     invoice.setPaidAt(Instant.now());
+                    invoice.setDunningStatus(null);
+                    invoice.setNextRetryAt(null);
 
-                    // Extract authorization info from webhook data
+                    // Extract authorization info from webhook data (Paystack format)
                     Map<String, Object> authData = (Map<String, Object>) data.get("authorization");
                     if (authData != null) {
                         String authCode = (String) authData.get("authorization_code");
@@ -143,14 +178,18 @@ public class PaymentFlowService {
                         String customerCode = customerData != null
                                 ? (String) customerData.get("customer_code") : null;
 
+                        String provider = invoice.getPaymentProvider() != null ? invoice.getPaymentProvider() : "paystack";
+
                         PaymentMethodEntity paymentMethod = PaymentMethodEntity.builder()
                                 .consumerId(invoice.getConsumerId())
                                 .type(cardType != null ? cardType : "card")
-                                .provider("paystack")
+                                .provider(provider)
                                 .providerRef(reference)
                                 .isDefault(true)
-                                .paystackAuthorizationCode(authCode)
-                                .paystackCustomerCode(customerCode)
+                                .authorizationToken(authCode)
+                                .customerToken(customerCode)
+                                .paystackAuthorizationCode("paystack".equals(provider) ? authCode : null)
+                                .paystackCustomerCode("paystack".equals(provider) ? customerCode : null)
                                 .cardLast4(last4)
                                 .cardBrand(brand)
                                 .build();
@@ -166,7 +205,7 @@ public class PaymentFlowService {
             String reference = (String) data.get("reference");
             log.warn("Processing charge.failed webhook for reference: {}", reference);
 
-            invoiceRepository.findByPaystackReference(reference).ifPresent(invoice -> {
+            findInvoiceByReferenceOpt(reference).ifPresent(invoice -> {
                 if (!"PAID".equals(invoice.getStatus())) {
                     invoice.setStatus("FAILED");
                     if (invoice.getDunningStatus() == null) {
@@ -181,5 +220,18 @@ public class PaymentFlowService {
         } else {
             log.info("Unhandled webhook event type: {}", eventType);
         }
+    }
+
+    private InvoiceEntity findInvoiceByReference(String reference) {
+        // Try new field first, fall back to legacy
+        return invoiceRepository.findByPaymentReference(reference)
+                .or(() -> invoiceRepository.findByPaystackReference(reference))
+                .orElseThrow(() -> new EntityNotFoundException("Invoice not found for reference: " + reference));
+    }
+
+    private Optional<InvoiceEntity> findInvoiceByReferenceOpt(String reference) {
+        Optional<InvoiceEntity> result = invoiceRepository.findByPaymentReference(reference);
+        if (result.isPresent()) return result;
+        return invoiceRepository.findByPaystackReference(reference);
     }
 }

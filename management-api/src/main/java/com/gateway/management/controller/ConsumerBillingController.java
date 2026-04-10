@@ -13,6 +13,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -23,6 +24,7 @@ public class ConsumerBillingController {
 
     private final ConsumerBillingService consumerBillingService;
     private final PaymentFlowService paymentFlowService;
+    private final com.gateway.management.service.payment.PaymentProviderFactory paymentProviderFactory;
 
     // ── Invoices ──────────────────────────────────────────────────────────
 
@@ -82,20 +84,32 @@ public class ConsumerBillingController {
     // ── Payments ────────────────────────────────────────────────────────────
 
     /**
-     * Initiates payment for an invoice via Paystack.
+     * Returns the list of payment gateways enabled by the admin.
+     */
+    @GetMapping("/payment-gateways")
+    public ResponseEntity<List<Map<String, String>>> listEnabledGateways() {
+        return ResponseEntity.ok(paymentProviderFactory.getEnabledProviders());
+    }
+
+    /**
+     * Initiates payment for an invoice via the specified (or default) payment gateway.
      */
     @PostMapping("/invoices/{id}/pay")
-    public ResponseEntity<PaymentInitResponse> payInvoice(@PathVariable UUID id) {
-        PaymentInitResponse response = paymentFlowService.initiateInvoicePayment(id);
+    public ResponseEntity<PaymentInitResponse> payInvoice(
+            @PathVariable UUID id,
+            @RequestParam(required = false) String provider) {
+        PaymentInitResponse response = paymentFlowService.initiateInvoicePayment(id, provider);
         return ResponseEntity.ok(response);
     }
 
     /**
-     * Verifies a payment after redirect from Paystack.
+     * Verifies a payment after redirect from any payment gateway.
      */
     @GetMapping("/payments/verify")
-    public ResponseEntity<InvoiceEntity> verifyPayment(@RequestParam String reference) {
-        InvoiceEntity invoice = paymentFlowService.verifyPayment(reference);
+    public ResponseEntity<InvoiceEntity> verifyPayment(
+            @RequestParam String reference,
+            @RequestParam(required = false) String provider) {
+        InvoiceEntity invoice = paymentFlowService.verifyPayment(reference, provider);
         return ResponseEntity.ok(invoice);
     }
 }

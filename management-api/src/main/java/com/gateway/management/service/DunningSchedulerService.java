@@ -148,24 +148,31 @@ public class DunningSchedulerService {
                 .findFirst()
                 .orElse(methods.isEmpty() ? null : methods.get(0));
 
-        if (defaultMethod == null || defaultMethod.getPaystackAuthorizationCode() == null) {
+        String authToken = defaultMethod.getAuthorizationToken() != null
+                ? defaultMethod.getAuthorizationToken() : defaultMethod.getPaystackAuthorizationCode();
+        if (defaultMethod == null || authToken == null) {
             return false;
         }
 
         try {
-            PaymentProvider provider = paymentProviderFactory.getActiveProvider();
+            PaymentProvider provider = defaultMethod.getProvider() != null
+                    ? paymentProviderFactory.getProvider(defaultMethod.getProvider())
+                    : paymentProviderFactory.getActiveProvider();
             String reference = "RETRY-" + invoice.getId().toString().substring(0, 8)
                     + "-" + System.currentTimeMillis();
 
+            String custToken = defaultMethod.getCustomerToken() != null
+                    ? defaultMethod.getCustomerToken() : defaultMethod.getPaystackCustomerCode();
             PaymentResult.ChargeResult result = provider.chargeAuthorization(
-                    defaultMethod.getPaystackAuthorizationCode(),
-                    defaultMethod.getPaystackCustomerCode(),
+                    authToken,
+                    custToken,
                     invoice.getTotalAmount(),
                     invoice.getCurrency() != null ? invoice.getCurrency() : paymentGatewaySettingsService.getDefaultCurrency(),
                     reference);
 
             if (result.isSuccessful()) {
-                invoice.setPaystackReference(reference);
+                invoice.setPaymentReference(reference);
+                invoice.setPaymentProvider(provider.getProviderName());
                 invoice.setPaymentMethodId(defaultMethod.getId());
                 return true;
             }
