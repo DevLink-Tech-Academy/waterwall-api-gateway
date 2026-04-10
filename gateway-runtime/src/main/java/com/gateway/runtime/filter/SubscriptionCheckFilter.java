@@ -105,6 +105,15 @@ public class SubscriptionCheckFilter implements Filter {
         log.debug("Subscription verified: appId={}, apiId={}, planId={}",
                 appId, apiId, subscription.getPlanId());
 
+        // In PAY_AS_YOU_GO mode, check wallet balance
+        if (isPayAsYouGoMode() && hasEmptyWallet(appId)) {
+            log.debug("Wallet empty for appId={} in PAY_AS_YOU_GO mode", appId);
+            writeErrorResponse(response, request, HttpServletResponse.SC_PAYMENT_REQUIRED,
+                    "INSUFFICIENT_BALANCE", "GW_402",
+                    "Your wallet balance is empty. Please top up your wallet to continue using this API.");
+            return;
+        }
+
         filterChain.doFilter(servletRequest, servletResponse);
     }
 
@@ -135,6 +144,35 @@ public class SubscriptionCheckFilter implements Filter {
             log.debug("Failed to lookup subscription block reason: {}", e.getMessage());
         }
         return "An active subscription is required to access this API.";
+    }
+
+    private boolean isPayAsYouGoMode() {
+        try {
+            String mode = jdbcTemplate.queryForObject(
+                    "SELECT setting_value FROM gateway.platform_settings WHERE setting_key = 'billing_mode'",
+                    String.class);
+            return "PAY_AS_YOU_GO".equals(mode);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean hasEmptyWallet(UUID appId) {
+        try {
+            // Check wallet for the app's owner (user_id from identity.applications)
+            // Also check directly by appId in case consumer_id is the appId
+            java.math.BigDecimal balance = jdbcTemplate.queryForObject(
+                    "SELECT COALESCE(w.balance, 0) FROM gateway.wallets w " +
+                    "WHERE w.consumer_id = ? " +
+                    "OR w.consumer_id = (SELECT user_id FROM identity.applications WHERE id = ? LIMIT 1) " +
+                    "ORDER BY w.balance DESC LIMIT 1",
+                    java.math.BigDecimal.class, appId, appId);
+            return balance == null || balance.signum() <= 0;
+        } catch (Exception e) {
+            // No wallet found — treat as empty
+            log.debug("Wallet lookup failed for appId={}: {}", appId, e.getMessage());
+            return true;
+        }
     }
 
     private GatewayAuthentication getAuthentication() {
