@@ -183,7 +183,7 @@ public class ConsumerAlertService {
             );
             planQuery.setParameter("userId", userId);
             List<?> results = planQuery.getResultList();
-            if (results.isEmpty()) {
+            if (results.isEmpty() || results.get(0) == null) {
                 return BigDecimal.ZERO;
             }
             long includedRequests = ((Number) results.get(0)).longValue();
