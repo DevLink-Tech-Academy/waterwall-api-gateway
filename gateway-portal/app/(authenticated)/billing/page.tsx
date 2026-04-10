@@ -146,6 +146,18 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
 
+  // Wallet state
+  const [wallet, setWallet] = useState<{ id: string; balance: number; currency: string; autoTopUpEnabled: boolean; autoTopUpThreshold: number; autoTopUpAmount: number; lowBalanceThreshold: number } | null>(null);
+  const [walletTxns, setWalletTxns] = useState<{ content: { id: string; type: string; amount: number; currency: string; description: string; balanceAfter: number; createdAt: string }[] }>({ content: [] });
+  const [topUpAmount, setTopUpAmount] = useState('');
+  const [topUpLoading, setTopUpLoading] = useState(false);
+
+  // Gateway selection state
+  const [enabledGateways, setEnabledGateways] = useState<{ provider: string; displayName: string }[]>([]);
+  const [showGatewayPicker, setShowGatewayPicker] = useState(false);
+  const [selectedGateway, setSelectedGateway] = useState('');
+  const [pendingPayInvoiceId, setPendingPayInvoiceId] = useState<string | null>(null);
+
   // add payment method form
   const [showAddPm, setShowAddPm] = useState(false);
   const [pmForm, setPmForm] = useState({ type: 'CREDIT_CARD', provider: '', providerRef: '' });
@@ -196,6 +208,9 @@ export default function BillingPage() {
       ['cost', `${API_BASE}/v1/consumer/usage/cost`, (d) => setCost(d as CostInfo)],
       ['invoices', `${API_BASE}/v1/consumer/invoices`, (d) => setInvoices(Array.isArray(d) ? d : [])],
       ['payments', `${API_BASE}/v1/consumer/payment-methods`, (d) => setPaymentMethods(Array.isArray(d) ? d : [])],
+      ['wallet', `${API_BASE}/v1/consumer/wallet`, (d) => setWallet(d as typeof wallet)],
+      ['gateways', `${API_BASE}/v1/consumer/payment-gateways`, (d) => setEnabledGateways(Array.isArray(d) ? d : [])],
+      ['walletTxns', `${API_BASE}/v1/consumer/wallet/transactions?size=10`, (d) => setWalletTxns(d as typeof walletTxns)],
     ];
 
     await Promise.allSettled(
@@ -218,8 +233,12 @@ export default function BillingPage() {
     const params = new URLSearchParams(window.location.search);
     const verify = params.get('verify');
     const reference = params.get('reference') || params.get('trxref');
+    const providerParam = params.get('provider') || '';
     if (verify === 'true' && reference) {
-      fetch(`${API_BASE}/v1/consumer/payments/verify?reference=${reference}`, { headers: authHeaders() })
+      const verifyUrl = providerParam
+          ? `${API_BASE}/v1/consumer/payments/verify?reference=${reference}&provider=${providerParam}`
+          : `${API_BASE}/v1/consumer/payments/verify?reference=${reference}`;
+      fetch(verifyUrl, { headers: authHeaders() })
         .then(res => {
           if (res.ok) {
             setVerifyMsg({ type: 'success', text: 'Payment successful! Your invoice has been marked as paid.' });
@@ -286,14 +305,28 @@ export default function BillingPage() {
     finally { setActionLoading(null); }
   };
 
-  const handlePayInvoice = async (invoiceId: string) => {
+  const handlePayInvoice = async (invoiceId: string, provider?: string) => {
+    // If multiple gateways enabled and no provider selected, show picker
+    if (!provider && enabledGateways.length > 1) {
+      setPendingPayInvoiceId(invoiceId);
+      setShowGatewayPicker(true);
+      return;
+    }
+
     setPayingInvoiceId(invoiceId);
+    setShowGatewayPicker(false);
     try {
-      const res = await fetch(`${API_BASE}/v1/consumer/invoices/${invoiceId}/pay`, {
+      const url = provider
+          ? `${API_BASE}/v1/consumer/invoices/${invoiceId}/pay?provider=${provider}`
+          : `${API_BASE}/v1/consumer/invoices/${invoiceId}/pay`;
+      const res = await fetch(url, {
         method: 'POST',
         headers: authHeaders(),
       });
-      if (!res.ok) throw new Error(`Payment initiation failed (${res.status})`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `Payment initiation failed (${res.status})`);
+      }
       const data = await res.json();
       if (data.authorizationUrl) {
         window.location.href = data.authorizationUrl;
@@ -301,6 +334,38 @@ export default function BillingPage() {
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to initiate payment');
       setPayingInvoiceId(null);
+    }
+  };
+
+  const confirmGatewayAndPay = () => {
+    if (pendingPayInvoiceId && selectedGateway) {
+      handlePayInvoice(pendingPayInvoiceId, selectedGateway);
+    }
+  };
+
+  const handleWalletTopUp = async () => {
+    const amount = parseFloat(topUpAmount);
+    if (isNaN(amount) || amount <= 0) return;
+    setTopUpLoading(true);
+    try {
+      const providerToUse = enabledGateways.length === 1 ? enabledGateways[0].provider : selectedGateway || enabledGateways[0]?.provider;
+      const res = await fetch(`${API_BASE}/v1/consumer/wallet/top-up`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ amount, provider: providerToUse }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Top-up failed');
+      }
+      const data = await res.json();
+      if (data.authorizationUrl) {
+        window.location.href = data.authorizationUrl;
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Top-up failed');
+    } finally {
+      setTopUpLoading(false);
     }
   };
 
@@ -919,7 +984,137 @@ export default function BillingPage() {
           )}
       </div>
 
-      {/* =========== 7. USAGE ALERTS =========== */}
+      {/* =========== 7. WALLET =========== */}
+      <div style={card}>
+        <h2 style={sectionTitle}>Wallet</h2>
+        {sectionErrors.wallet && errBox(sectionErrors.wallet)}
+        {wallet ? (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 20 }}>
+              <div style={{ padding: 16, backgroundColor: '#f0fdf4', borderRadius: 10, textAlign: 'center' }}>
+                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Balance</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#16a34a' }}>{fmtCurrency(wallet.balance, wallet.currency)}</div>
+              </div>
+              <div style={{ padding: 16, backgroundColor: '#f8fafc', borderRadius: 10, textAlign: 'center' }}>
+                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Auto Top-Up</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: wallet.autoTopUpEnabled ? '#16a34a' : '#94a3b8' }}>
+                  {wallet.autoTopUpEnabled ? `Enabled (below ${fmtCurrency(wallet.autoTopUpThreshold || 0, wallet.currency)})` : 'Disabled'}
+                </div>
+              </div>
+              <div style={{ padding: 16, backgroundColor: '#f8fafc', borderRadius: 10, textAlign: 'center' }}>
+                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Low Balance Alert</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: '#475569' }}>
+                  {wallet.lowBalanceThreshold ? fmtCurrency(wallet.lowBalanceThreshold, wallet.currency) : 'Not set'}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 20 }}>
+              <input
+                type="number"
+                placeholder="Amount to top up"
+                value={topUpAmount}
+                onChange={(e) => setTopUpAmount(e.target.value)}
+                style={{ ...inputStyle, width: 200 }}
+              />
+              <button
+                onClick={handleWalletTopUp}
+                disabled={topUpLoading || !topUpAmount}
+                style={{ ...btnPrimary, opacity: topUpLoading || !topUpAmount ? 0.5 : 1 }}
+              >
+                {topUpLoading ? 'Processing...' : 'Top Up Wallet'}
+              </button>
+            </div>
+
+            {walletTxns.content && walletTxns.content.length > 0 && (
+              <div>
+                <h3 style={{ fontSize: 14, fontWeight: 600, color: '#334155', marginBottom: 10 }}>Recent Transactions</h3>
+                <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>Type</th>
+                        <th style={thStyle}>Description</th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>Amount</th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>Balance</th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {walletTxns.content.map((txn) => (
+                        <tr key={txn.id}>
+                          <td style={tdStyle}>
+                            <span style={{
+                              padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600,
+                              backgroundColor: txn.type === 'CREDIT' ? '#dcfce7' : '#fee2e2',
+                              color: txn.type === 'CREDIT' ? '#16a34a' : '#dc2626',
+                            }}>{txn.type}</span>
+                          </td>
+                          <td style={tdStyle}>{txn.description}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600,
+                            color: txn.type === 'CREDIT' ? '#16a34a' : '#dc2626' }}>
+                            {txn.type === 'CREDIT' ? '+' : '-'}{fmtCurrency(txn.amount, txn.currency)}
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtCurrency(txn.balanceAfter, txn.currency)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtDate(txn.createdAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : emptyState('\u{1F4B0}', 'No wallet yet', 'Your wallet will be created when you first top up.')}
+      </div>
+
+      {/* =========== GATEWAY PICKER MODAL =========== */}
+      {showGatewayPicker && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: '#fff', borderRadius: 16, padding: 28,
+            width: 400, maxWidth: '90vw',
+          }}>
+            <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, color: '#0f172a' }}>
+              Choose Payment Method
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+              {enabledGateways.map((gw) => (
+                <button
+                  key={gw.provider}
+                  onClick={() => setSelectedGateway(gw.provider)}
+                  style={{
+                    padding: '14px 18px', borderRadius: 10, border: '2px solid',
+                    borderColor: selectedGateway === gw.provider ? '#3b82f6' : '#e2e8f0',
+                    backgroundColor: selectedGateway === gw.provider ? '#eff6ff' : '#fff',
+                    cursor: 'pointer', textAlign: 'left', fontSize: 15, fontWeight: 600,
+                    color: '#334155',
+                  }}
+                >
+                  {gw.displayName}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { setShowGatewayPicker(false); setPendingPayInvoiceId(null); }}
+                style={btnSecondary}
+              >Cancel</button>
+              <button
+                onClick={confirmGatewayAndPay}
+                disabled={!selectedGateway}
+                style={{ ...btnPrimary, opacity: selectedGateway ? 1 : 0.5 }}
+              >Pay with {enabledGateways.find(g => g.provider === selectedGateway)?.displayName || '...'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========== 8. USAGE ALERTS =========== */}
       <div style={card}>
         <h2 style={sectionTitle}>Usage Alerts</h2>
         <p style={{ fontSize: 13, color: '#94a3b8', margin: '-8px 0 20px' }}>Get notified when your usage exceeds thresholds</p>
