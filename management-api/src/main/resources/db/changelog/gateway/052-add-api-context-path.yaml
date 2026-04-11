@@ -19,17 +19,24 @@ databaseChangeLog:
   - changeSet:
       id: gw-052-auto-generate-context-paths
       author: gateway-team
-      comment: Generate context_path from existing API names for APIs that don't have one
+      comment: Generate unique context_path from existing API names using window function to handle duplicates
       changes:
         - sql:
             sql: |
               UPDATE gateway.apis
-              SET context_path = LOWER(REGEXP_REPLACE(REGEXP_REPLACE(name, '[^a-zA-Z0-9]+', '-', 'g'), '(^-|-$)', '', 'g'))
-              WHERE context_path IS NULL;
-
-              -- Handle duplicates by appending a suffix
-              UPDATE gateway.apis a
-              SET context_path = a.context_path || '-' || LEFT(a.id::text, 4)
-              WHERE a.context_path IN (
-                SELECT context_path FROM gateway.apis GROUP BY context_path HAVING COUNT(*) > 1
-              );
+              SET context_path = sub.unique_slug
+              FROM (
+                SELECT id,
+                  CASE
+                    WHEN dup_count = 1 THEN base_slug
+                    ELSE base_slug || '-' || LEFT(id::text, 4)
+                  END AS unique_slug
+                FROM (
+                  SELECT id, name,
+                    LOWER(REGEXP_REPLACE(REGEXP_REPLACE(name, '[^a-zA-Z0-9]+', '-', 'g'), '(^-|-$)', '', 'g')) AS base_slug,
+                    COUNT(*) OVER (PARTITION BY LOWER(REGEXP_REPLACE(REGEXP_REPLACE(name, '[^a-zA-Z0-9]+', '-', 'g'), '(^-|-$)', '', 'g'))) AS dup_count
+                  FROM gateway.apis
+                  WHERE context_path IS NULL
+                ) inner_q
+              ) sub
+              WHERE gateway.apis.id = sub.id AND gateway.apis.context_path IS NULL;
