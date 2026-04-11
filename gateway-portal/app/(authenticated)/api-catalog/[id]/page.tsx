@@ -202,10 +202,9 @@ export default function ApiDetailPage() {
     setTryError('');
     setTryResponse(null);
 
-    // Build full gateway URL with context path and version
+    // Build full gateway URL with context path
     const ctxPath = api?.contextPath ? `/${api.contextPath}` : '';
-    const verPath = api?.version ? `/${api.version}` : '';
-    const url = `${GATEWAY_URL}${ctxPath}${verPath}${route.path}`;
+    const url = `${GATEWAY_URL}${ctxPath}${route.path}`;
     const hdrs: Record<string, string> = {
       'Content-Type': isSoap ? 'text/xml; charset=utf-8' : 'application/json',
     };
@@ -424,7 +423,7 @@ export default function ApiDetailPage() {
 
     const specWithGateway = {
       ...rawSpec,
-      servers: [{ url: `${GATEWAY_URL}${api?.contextPath ? '/' + api.contextPath : ''}${api?.version ? '/' + api.version : ''}`, description: 'Waterwall API Gateway' }],
+      servers: [{ url: `${GATEWAY_URL}${api?.contextPath ? '/' + api.contextPath : ''}`, description: 'Waterwall API Gateway' }],
       components,
       security: globalSecurity,
       // Also override Swagger 2.0 securityDefinitions if present

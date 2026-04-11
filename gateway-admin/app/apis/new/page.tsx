@@ -154,7 +154,7 @@ export default function CreateApiPage() {
             />
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Gateway URL: /{contextPath || 'context-path'}/{'{version}'}/...
+            Gateway URL: /{contextPath || 'context-path'}/your-route-path
           </p>
         </div>
 

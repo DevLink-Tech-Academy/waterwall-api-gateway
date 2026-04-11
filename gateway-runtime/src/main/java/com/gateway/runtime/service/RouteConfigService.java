@@ -378,9 +378,9 @@ public class RouteConfigService {
             if (!contextPath.startsWith("/")) sb.append("/");
             sb.append(contextPath);
         }
-        if (version != null && !version.isBlank()) {
-            sb.append("/").append(version);
-        }
+        // Note: API version is NOT included in the gateway path.
+        // Routes already contain their own version prefixes (e.g. /v1/orders).
+        // The API 'version' field is metadata, not a URL component.
         if (routePath != null) {
             if (!routePath.startsWith("/")) sb.append("/");
             sb.append(routePath);
