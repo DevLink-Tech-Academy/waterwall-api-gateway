@@ -1,0 +1,108 @@
+databaseChangeLog:
+  - changeSet:
+      id: gw-050-create-ledger-entries
+      author: gateway-team
+      changes:
+        - createTable:
+            schemaName: gateway
+            tableName: ledger_entries
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  defaultValueComputed: gen_random_uuid()
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: wallet_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: entry_type
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: category
+                  type: varchar(30)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: amount
+                  type: decimal(12,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: currency
+                  type: varchar(10)
+              - column:
+                  name: reference
+                  type: varchar(255)
+              - column:
+                  name: description
+                  type: varchar(500)
+              - column:
+                  name: api_id
+                  type: uuid
+              - column:
+                  name: plan_id
+                  type: uuid
+              - column:
+                  name: pricing_model
+                  type: varchar(20)
+              - column:
+                  name: billing_period
+                  type: varchar(20)
+              - column:
+                  name: running_balance
+                  type: decimal(12,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: related_invoice_id
+                  type: uuid
+              - column:
+                  name: metadata
+                  type: jsonb
+              - column:
+                  name: created_at
+                  type: timestamptz
+                  defaultValueComputed: now()
+        - addForeignKeyConstraint:
+            baseTableSchemaName: gateway
+            baseTableName: ledger_entries
+            baseColumnNames: wallet_id
+            referencedTableSchemaName: gateway
+            referencedTableName: wallets
+            referencedColumnNames: id
+            constraintName: fk_ledger_wallet
+        - createIndex:
+            schemaName: gateway
+            tableName: ledger_entries
+            indexName: idx_ledger_wallet_period_created
+            columns:
+              - column: { name: wallet_id }
+              - column: { name: billing_period }
+              - column: { name: created_at, descending: true }
+        - createIndex:
+            schemaName: gateway
+            tableName: ledger_entries
+            indexName: idx_ledger_reference
+            columns:
+              - column: { name: reference }
+
+  - changeSet:
+      id: gw-050-add-wallet-ledger-columns
+      author: gateway-team
+      changes:
+        - addColumn:
+            schemaName: gateway
+            tableName: wallets
+            columns:
+              - column:
+                  name: last_reconciled_at
+                  type: timestamptz
+              - column:
+                  name: current_period
+                  type: varchar(20)

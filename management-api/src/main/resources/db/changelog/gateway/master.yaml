@@ -98,4 +98,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/gateway/049-add-pending-topup.yaml
   - include:
+      file: db/changelog/gateway/050-create-ledger.yaml
+  - include:
       file: db/changelog/gateway/seed-001-sample-data.yaml
