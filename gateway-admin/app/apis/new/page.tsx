@@ -23,6 +23,7 @@ interface CreateApiPayload {
   category: string;
   tags: string[];
   backendBaseUrl?: string;
+  contextPath?: string;
 }
 
 interface CreatedApi {
@@ -67,9 +68,14 @@ export default function CreateApiPage() {
   const [category, setCategory] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [backendBaseUrl, setBackendBaseUrl] = useState('');
+  const [contextPath, setContextPath] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const generateSlug = (name: string) => {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,6 +92,7 @@ export default function CreateApiPage() {
       visibility,
       category: category.trim(),
       backendBaseUrl: backendBaseUrl.trim() || undefined,
+      contextPath: contextPath.trim() || undefined,
       tags: tagsInput
         .split(',')
         .map((t) => t.trim())
@@ -125,12 +132,31 @@ export default function CreateApiPage() {
           <input
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setName(e.target.value); if (!contextPath) setContextPath(generateSlug(e.target.value)); }}
             required
             className={inputCls}
             placeholder="My API"
           />
         </Field>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">
+            Context Path <span className="text-xs text-slate-400">(auto-generated, editable)</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-400">/</span>
+            <input
+              type="text"
+              value={contextPath}
+              onChange={(e) => setContextPath(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+              placeholder="e.g. my-api"
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm shadow-sm placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all"
+            />
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            Gateway URL: /{contextPath || 'context-path'}/{'{version}'}/...
+          </p>
+        </div>
 
         <Field label="Version">
           <input
