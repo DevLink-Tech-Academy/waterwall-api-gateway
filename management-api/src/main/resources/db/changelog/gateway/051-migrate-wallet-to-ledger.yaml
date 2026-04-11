@@ -1,0 +1,72 @@
+databaseChangeLog:
+  - changeSet:
+      id: gw-051-migrate-credits-to-ledger
+      author: gateway-team
+      comment: Migrate existing wallet CREDIT transactions to ledger_entries
+      preConditions:
+        - onFail: MARK_RAN
+        - tableExists:
+            schemaName: gateway
+            tableName: wallet_transactions
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO gateway.ledger_entries (wallet_id, entry_type, category, amount, currency, reference, description, billing_period, running_balance, created_at)
+              SELECT wt.wallet_id, 'CREDIT', 'TOP_UP', wt.amount, wt.currency, wt.reference, wt.description,
+                     to_char(wt.created_at, 'YYYY-MM'), wt.balance_after, wt.created_at
+              FROM gateway.wallet_transactions wt
+              WHERE wt.type = 'CREDIT'
+              AND NOT EXISTS (SELECT 1 FROM gateway.ledger_entries le WHERE le.reference = wt.reference)
+      rollback:
+        - sql:
+            sql: DELETE FROM gateway.ledger_entries WHERE category = 'TOP_UP' AND description LIKE '%top-up%'
+
+  - changeSet:
+      id: gw-051-migrate-debits-to-ledger
+      author: gateway-team
+      comment: Migrate existing wallet DEBIT transactions to ledger_entries
+      preConditions:
+        - onFail: MARK_RAN
+        - tableExists:
+            schemaName: gateway
+            tableName: wallet_transactions
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO gateway.ledger_entries (wallet_id, entry_type, category, amount, currency, reference, description, billing_period, running_balance, created_at)
+              SELECT wt.wallet_id, 'DEBIT', 'USAGE_CHARGE', wt.amount, wt.currency, wt.reference, wt.description,
+                     to_char(wt.created_at, 'YYYY-MM'), wt.balance_after, wt.created_at
+              FROM gateway.wallet_transactions wt
+              WHERE wt.type = 'DEBIT'
+              AND NOT EXISTS (SELECT 1 FROM gateway.ledger_entries le WHERE le.reference = wt.reference)
+      rollback:
+        - sql:
+            sql: DELETE FROM gateway.ledger_entries WHERE category = 'USAGE_CHARGE'
+
+  - changeSet:
+      id: gw-051-create-opening-balance-bf
+      author: gateway-team
+      comment: Create Balance B/F entries for current period from existing wallet balances
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO gateway.ledger_entries (wallet_id, entry_type, category, amount, currency, reference, description, billing_period, running_balance, created_at)
+              SELECT w.id, 'BALANCE_BF', 'PERIOD_OPEN', w.balance, w.currency,
+                     'BF-' || left(w.id::text, 8) || '-' || to_char(now(), 'YYYY-MM'),
+                     'Opening balance (migrated)', to_char(now(), 'YYYY-MM'), w.balance, date_trunc('month', now())
+              FROM gateway.wallets w
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM gateway.ledger_entries le
+                  WHERE le.wallet_id = w.id AND le.entry_type = 'BALANCE_BF' AND le.billing_period = to_char(now(), 'YYYY-MM')
+              )
+      rollback:
+        - sql:
+            sql: DELETE FROM gateway.ledger_entries WHERE entry_type = 'BALANCE_BF' AND description LIKE '%migrated%'
+
+  - changeSet:
+      id: gw-051-set-wallet-current-period
+      author: gateway-team
+      comment: Set current_period on wallets that don't have it
+      changes:
+        - sql:
+            sql: UPDATE gateway.wallets SET current_period = to_char(now(), 'YYYY-MM') WHERE current_period IS NULL
