@@ -2,6 +2,7 @@ package com.gateway.management.service;
 
 import com.gateway.management.entity.PlanEntity;
 import com.gateway.management.entity.SubscriptionEntity;
+import com.gateway.management.entity.WalletEntity;
 import com.gateway.management.entity.enums.SubStatus;
 import com.gateway.management.repository.SubscriptionRepository;
 import com.gateway.management.repository.WalletRepository;
@@ -27,6 +28,7 @@ public class WalletDeductionScheduler {
     private final SubscriptionRepository subscriptionRepository;
     private final WalletRepository walletRepository;
     private final WalletService walletService;
+    private final LedgerService ledgerService;
     private final EntityManager entityManager;
 
     private volatile Instant lastRunTime = null;
@@ -74,9 +76,8 @@ public class WalletDeductionScheduler {
 
         // Process each subscription individually (per app + per API)
         int deducted = 0;
-        // Track which wallet owners we've already charged per this cycle to aggregate totals
-        Map<UUID, BigDecimal> totalCostPerOwner = new HashMap<>();
-        Map<UUID, StringBuilder> descPerOwner = new HashMap<>();
+        // Collect per-API deduction items per wallet owner for traceability
+        Map<UUID, List<DeductionItem>> deductionsByOwner = new HashMap<>();
 
         for (SubscriptionEntity sub : subscriptions) {
             UUID appId = sub.getApplicationId();
@@ -117,30 +118,47 @@ public class WalletDeductionScheduler {
                 BigDecimal rate = plan.getOverageRate() != null ? plan.getOverageRate() : BigDecimal.ZERO;
                 String apiName = sub.getApi().getName() != null ? sub.getApi().getName() : apiId.toString().substring(0, 8);
 
-                totalCostPerOwner.merge(walletOwnerId, cost, BigDecimal::add);
-                descPerOwner.computeIfAbsent(walletOwnerId, k -> new StringBuilder())
-                        .append(requestCount).append(" calls to ").append(apiName)
-                        .append(" @ ").append(rate).append("/req (").append(model).append("); ");
+                long billable = rate.signum() > 0
+                        ? cost.divide(rate, 0, java.math.RoundingMode.HALF_UP).longValue()
+                        : requestCount;
+                long freeUsed = Math.max(0, requestCount - billable);
+
+                deductionsByOwner.computeIfAbsent(walletOwnerId, k -> new ArrayList<>())
+                        .add(new DeductionItem(sub.getApi().getId(), plan.getId(),
+                                apiName, model, rate, cost, requestCount, billable, freeUsed));
 
             } catch (Exception e) {
                 log.error("Wallet deduction calc error for app={} api={}: {}", appId, apiId, e.getMessage());
             }
         }
 
-        // Now deduct aggregated costs per wallet owner
-        for (Map.Entry<UUID, BigDecimal> entry : totalCostPerOwner.entrySet()) {
+        // Deduct from wallets via ledger (per-API entries for traceability)
+        for (Map.Entry<UUID, List<DeductionItem>> entry : deductionsByOwner.entrySet()) {
             UUID ownerId = entry.getKey();
-            BigDecimal totalCost = entry.getValue().setScale(2, RoundingMode.HALF_UP);
-            String desc = descPerOwner.get(ownerId).toString();
+            List<DeductionItem> items = entry.getValue();
 
-            try {
-                walletService.deduct(ownerId, totalCost,
-                        "USAGE-" + now.toEpochMilli(), desc.trim(), null);
-                deducted++;
-            } catch (IllegalStateException e) {
-                log.warn("Wallet deduction failed for owner={}: {}", ownerId, e.getMessage());
-            } catch (Exception e) {
-                log.error("Wallet deduction error for owner={}: {}", ownerId, e.getMessage());
+            for (DeductionItem item : items) {
+                try {
+                    WalletEntity wallet = walletRepository.findByConsumerId(ownerId).orElse(null);
+                    if (wallet == null) continue;
+
+                    Map<String, Object> metadata = new HashMap<>();
+                    metadata.put("requestCount", item.requestCount);
+                    metadata.put("rate", item.rate.toPlainString());
+                    metadata.put("freeUsed", item.freeUsed);
+                    metadata.put("billable", item.billable);
+
+                    ledgerService.debit(wallet.getId(), item.cost,
+                            com.gateway.management.entity.LedgerEntryEntity.CAT_USAGE_CHARGE,
+                            "USAGE-" + item.apiId.toString().substring(0, 8) + "-" + now.toEpochMilli(),
+                            item.requestCount + " calls to " + item.apiName + " @ " + item.rate + "/req (" + item.pricingModel + ")",
+                            item.apiId, item.planId, item.pricingModel, metadata);
+                    deducted++;
+                } catch (IllegalStateException e) {
+                    log.warn("Wallet deduction failed for owner={}: {}", ownerId, e.getMessage());
+                } catch (Exception e) {
+                    log.error("Wallet deduction error for owner={}: {}", ownerId, e.getMessage());
+                }
             }
         }
 
@@ -184,6 +202,10 @@ public class WalletDeductionScheduler {
         }
     }
 
+
+    private record DeductionItem(UUID apiId, UUID planId, String apiName, String pricingModel,
+                                  BigDecimal rate, BigDecimal cost, long requestCount,
+                                  long billable, long freeUsed) {}
 
     /**
      * Maps application IDs to the user IDs that own them.
