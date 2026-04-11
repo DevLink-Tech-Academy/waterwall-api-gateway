@@ -242,6 +242,12 @@ public class RestProxyHandler implements ProtocolProxyHandler {
             upstreamBase = upstreamBase.substring(0, upstreamBase.length() - 1);
         }
 
+        // If upstream URL already ends with the remaining path, don't duplicate it
+        // This happens when upstream_url was built from backend_base_url + route_path
+        if (!remainingPath.isEmpty() && !remainingPath.equals("/") && upstreamBase.endsWith(remainingPath)) {
+            remainingPath = "";
+        }
+
         String fullUrl = upstreamBase + remainingPath;
 
         String queryString = request.getQueryString();
