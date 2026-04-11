@@ -140,7 +140,7 @@ public class ImportService {
                 .build();
 
         // Auto-generate context path from API name
-        String contextPath = request.getContextPath();
+        String contextPath = null;
         if (contextPath == null || contextPath.isBlank()) {
             contextPath = api.getName().toLowerCase()
                     .replaceAll("[^a-z0-9]+", "-")
