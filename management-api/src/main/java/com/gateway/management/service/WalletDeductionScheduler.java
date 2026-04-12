@@ -41,7 +41,6 @@ public class WalletDeductionScheduler {
      * changes without restart.
      */
     @Scheduled(fixedDelay = 60_000, initialDelay = 120_000)
-    @Transactional
     public void deductUsage() {
         if (!platformSettingsService.isPayAsYouGoMode()) {
             return;
