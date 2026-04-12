@@ -68,16 +68,13 @@ public class RouteConfigService {
             loadSubscriptions(loadedSubsByApp, loadedSubIndex);
             Map<UUID, String> loadedGatewayConfigs = loadGatewayConfigs();
 
-            lock.writeLock().lock();
-            try {
-                this.routes = loadedRoutes;
-                this.plansById = loadedPlans;
-                this.subscriptionsByApp = loadedSubsByApp;
-                this.subscriptionIndex = loadedSubIndex;
-                this.gatewayConfigByApiId = loadedGatewayConfigs;
-            } finally {
-                lock.writeLock().unlock();
-            }
+            // Atomic swap of volatile references — no lock needed for readers
+            // Volatile guarantees visibility; all data is fully constructed before assignment
+            this.routes = List.copyOf(loadedRoutes);
+            this.plansById = Map.copyOf(loadedPlans);
+            this.subscriptionsByApp = Map.copyOf(loadedSubsByApp);
+            this.subscriptionIndex = Map.copyOf(loadedSubIndex);
+            this.gatewayConfigByApiId = Map.copyOf(loadedGatewayConfigs);
 
             long version = configVersion.incrementAndGet();
             lastReloadTime = Instant.now();
@@ -112,57 +109,33 @@ public class RouteConfigService {
     // ── Public accessors ────────────────────────────────────────────────
 
     public List<GatewayRoute> getAllRoutes() {
-        lock.readLock().lock();
-        try {
-            return routes;
-        } finally {
-            lock.readLock().unlock();
-        }
+        // No lock needed — volatile references to immutable collections
+        return routes;
     }
 
     public Map<UUID, GatewayPlan> getPlansById() {
-        lock.readLock().lock();
-        try {
-            return plansById;
-        } finally {
-            lock.readLock().unlock();
-        }
+        return plansById;
     }
 
     public List<GatewaySubscription> getSubscriptionsForApp(UUID applicationId) {
-        lock.readLock().lock();
-        try {
-            return subscriptionsByApp.getOrDefault(applicationId, List.of());
-        } finally {
-            lock.readLock().unlock();
-        }
+        return subscriptionsByApp.getOrDefault(applicationId, List.of());
     }
 
     public Optional<GatewaySubscription> getSubscription(UUID appId, UUID apiId) {
-        lock.readLock().lock();
-        try {
-            String key = appId.toString() + ":" + apiId.toString();
-            return Optional.ofNullable(subscriptionIndex.get(key));
-        } finally {
-            lock.readLock().unlock();
-        }
+        String key = appId.toString() + ":" + apiId.toString();
+        return Optional.ofNullable(subscriptionIndex.get(key));
     }
 
     public Optional<GatewaySubscription> getSubscription(UUID appId, UUID apiId, String environmentSlug) {
-        lock.readLock().lock();
-        try {
-            // Try environment-specific match first
-            if (environmentSlug != null) {
-                String envKey = appId.toString() + ":" + apiId.toString() + ":" + environmentSlug;
-                GatewaySubscription envSub = subscriptionIndex.get(envKey);
-                if (envSub != null) return Optional.of(envSub);
-            }
-            // Fall back to non-environment match (backwards compatibility)
-            String key = appId.toString() + ":" + apiId.toString();
-            return Optional.ofNullable(subscriptionIndex.get(key));
-        } finally {
-            lock.readLock().unlock();
+        // Try environment-specific match first
+        if (environmentSlug != null) {
+            String envKey = appId.toString() + ":" + apiId.toString() + ":" + environmentSlug;
+            GatewaySubscription envSub = subscriptionIndex.get(envKey);
+            if (envSub != null) return Optional.of(envSub);
         }
+        // Fall back to non-environment match
+        String key = appId.toString() + ":" + apiId.toString();
+        return Optional.ofNullable(subscriptionIndex.get(key));
     }
 
     public long getConfigVersion() {
@@ -174,42 +147,22 @@ public class RouteConfigService {
     }
 
     public int getRouteCount() {
-        lock.readLock().lock();
-        try {
-            return routes.size();
-        } finally {
-            lock.readLock().unlock();
-        }
+        return routes.size();
     }
 
     public int getPlanCount() {
-        lock.readLock().lock();
-        try {
-            return plansById.size();
-        } finally {
-            lock.readLock().unlock();
-        }
+        return plansById.size();
     }
 
     public int getSubscriptionCount() {
-        lock.readLock().lock();
-        try {
-            return subscriptionIndex.size();
-        } finally {
-            lock.readLock().unlock();
-        }
+        return subscriptionIndex.size();
     }
 
     /**
      * Return the raw gateway_config JSON for a given API ID, or null if not present.
      */
     public String getGatewayConfig(UUID apiId) {
-        lock.readLock().lock();
-        try {
-            return gatewayConfigByApiId.get(apiId);
-        } finally {
-            lock.readLock().unlock();
-        }
+        return gatewayConfigByApiId.get(apiId);
     }
 
     // ── Private loaders ─────────────────────────────────────────────────
