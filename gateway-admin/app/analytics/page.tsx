@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { DataTable } from '@gateway/shared-ui';
 import type { Column } from '@gateway/shared-ui';
@@ -31,6 +31,31 @@ interface TopConsumer {
   errorCount: number;
   avgLatencyMs: number;
   [key: string]: unknown;
+}
+
+interface LatencyBreakdown {
+  apiId: string;
+  apiName: string;
+  totalRequests: number;
+  avgTotalMs: number;
+  avgUpstreamMs: number;
+  avgGatewayMs: number;
+  p95TotalMs: number;
+  p95UpstreamMs: number;
+  maxTotalMs: number;
+  maxUpstreamMs: number;
+}
+
+interface RequestSample {
+  id: number;
+  method: string;
+  path: string;
+  statusCode: number;
+  totalMs: number;
+  upstreamMs: number;
+  gatewayMs: number;
+  clientIp: string;
+  createdAt: string;
 }
 
 const RANGES = ['1h', '6h', '24h', '7d', '30d'] as const;
@@ -152,6 +177,322 @@ function EmptyIcon() {
     >
       <path strokeLinecap="round" strokeLinejoin="round" d="M20 13V7a2 2 0 00-2-2H6a2 2 0 00-2 2v6m16 0v6a2 2 0 01-2 2H6a2 2 0 01-2-2v-6m16 0H4" />
     </svg>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Latency breakdown helpers                                          */
+/* ------------------------------------------------------------------ */
+
+function StatusBadge({ code }: { code: number }) {
+  let colorClass = 'bg-green-100 text-green-700';
+  if (code >= 500) colorClass = 'bg-red-100 text-red-700';
+  else if (code >= 400) colorClass = 'bg-amber-100 text-amber-700';
+  else if (code >= 300) colorClass = 'bg-blue-100 text-blue-700';
+  return (
+    <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-semibold ${colorClass}`}>
+      {code}
+    </span>
+  );
+}
+
+function MethodBadge({ method }: { method: string }) {
+  const colors: Record<string, string> = {
+    GET: 'bg-sky-100 text-sky-700',
+    POST: 'bg-emerald-100 text-emerald-700',
+    PUT: 'bg-violet-100 text-violet-700',
+    PATCH: 'bg-orange-100 text-orange-700',
+    DELETE: 'bg-red-100 text-red-700',
+  };
+  const cls = colors[method.toUpperCase()] ?? 'bg-gray-100 text-gray-600';
+  return (
+    <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-bold ${cls}`}>
+      {method}
+    </span>
+  );
+}
+
+/** Proportional stacked bar: blue = upstream, orange = gateway */
+function LatencyBar({
+  upstreamMs,
+  gatewayMs,
+  height = 8,
+}: {
+  upstreamMs: number;
+  gatewayMs: number;
+  height?: number;
+}) {
+  const total = upstreamMs + gatewayMs;
+  if (total <= 0) return <div className="h-2 w-full rounded-full bg-gray-100" />;
+  const upstreamPct = Math.round((upstreamMs / total) * 100);
+  const gatewayPct = 100 - upstreamPct;
+  return (
+    <div
+      className="flex w-full overflow-hidden rounded-full"
+      style={{ height }}
+      title={`Upstream: ${upstreamMs}ms  Gateway: ${gatewayMs}ms`}
+    >
+      {upstreamPct > 0 && (
+        <div className="bg-blue-500" style={{ width: `${upstreamPct}%` }} />
+      )}
+      {gatewayPct > 0 && (
+        <div className="bg-orange-400" style={{ width: `${gatewayPct}%` }} />
+      )}
+    </div>
+  );
+}
+
+function RequestSamplesTable({ samples, loading }: { samples: RequestSample[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="animate-pulse space-y-2 p-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-8 rounded bg-gray-100" />
+        ))}
+      </div>
+    );
+  }
+  if (samples.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-8 text-sm text-gray-400">
+        No recent samples available.
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-100 bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
+            <th className="px-4 py-2 text-left">Method + Path</th>
+            <th className="px-4 py-2 text-left">Status</th>
+            <th className="px-4 py-2 text-left">Breakdown</th>
+            <th className="px-4 py-2 text-right">Total (ms)</th>
+            <th className="px-4 py-2 text-left">Timestamp</th>
+          </tr>
+        </thead>
+        <tbody>
+          {samples.map((s) => (
+            <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50/60">
+              <td className="px-4 py-2">
+                <div className="flex items-center gap-2">
+                  <MethodBadge method={s.method} />
+                  <span className="font-mono text-xs text-gray-700">{s.path}</span>
+                </div>
+              </td>
+              <td className="px-4 py-2">
+                <StatusBadge code={s.statusCode} />
+              </td>
+              <td className="px-4 py-2 min-w-[120px]">
+                <LatencyBar upstreamMs={s.upstreamMs} gatewayMs={s.gatewayMs} />
+                <div className="mt-0.5 flex justify-between text-[10px] text-gray-400">
+                  <span className="text-blue-500">{s.upstreamMs}ms</span>
+                  <span className="text-orange-400">{s.gatewayMs}ms</span>
+                </div>
+              </td>
+              <td className="px-4 py-2 text-right font-mono font-semibold text-gray-800">
+                {s.totalMs}
+              </td>
+              <td className="px-4 py-2 text-xs text-gray-400">
+                {new Date(s.createdAt).toLocaleString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function LatencyBreakdownSection({ range }: { range: Range }) {
+  const [breakdown, setBreakdown] = useState<LatencyBreakdown[]>([]);
+  const [loadingBreakdown, setLoadingBreakdown] = useState(true);
+  const [breakdownError, setBreakdownError] = useState('');
+  const [expandedApiId, setExpandedApiId] = useState<string | null>(null);
+  const [samplesMap, setSamplesMap] = useState<Record<string, RequestSample[]>>({});
+  const [loadingSamplesFor, setLoadingSamplesFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoadingBreakdown(true);
+    setBreakdownError('');
+    setExpandedApiId(null);
+    fetchAnalytics<LatencyBreakdown[]>(`/v1/analytics/dashboard/latency-breakdown?range=${range}`)
+      .then((data) => setBreakdown(Array.isArray(data) ? data : []))
+      .catch(() => setBreakdownError('Failed to load latency breakdown'))
+      .finally(() => setLoadingBreakdown(false));
+  }, [range]);
+
+  const handleToggleExpand = useCallback(
+    async (apiId: string) => {
+      if (expandedApiId === apiId) {
+        setExpandedApiId(null);
+        return;
+      }
+      setExpandedApiId(apiId);
+      if (samplesMap[apiId]) return; // already loaded
+      setLoadingSamplesFor(apiId);
+      try {
+        const samples = await fetchAnalytics<RequestSample[]>(
+          `/v1/analytics/dashboard/api/${apiId}/samples?limit=20`,
+        );
+        setSamplesMap((prev) => ({ ...prev, [apiId]: Array.isArray(samples) ? samples : [] }));
+      } catch {
+        setSamplesMap((prev) => ({ ...prev, [apiId]: [] }));
+      } finally {
+        setLoadingSamplesFor(null);
+      }
+    },
+    [expandedApiId, samplesMap],
+  );
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div className="border-b border-gray-100 px-6 py-4">
+        <h3 className="text-base font-semibold text-gray-900">Latency Breakdown by API</h3>
+        <p className="mt-1 text-xs text-gray-400">
+          Per-API latency averages with upstream vs gateway split. Click{' '}
+          <span className="font-medium text-gray-600">expand</span> to see recent request samples.
+        </p>
+        <div className="mt-2 flex items-center gap-4 text-xs text-gray-500">
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2.5 w-5 rounded-full bg-blue-500" />
+            Upstream
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2.5 w-5 rounded-full bg-orange-400" />
+            Gateway
+          </span>
+        </div>
+      </div>
+
+      {breakdownError && (
+        <div className="px-6 py-4 text-sm text-red-600">{breakdownError}</div>
+      )}
+
+      {loadingBreakdown ? (
+        <div className="p-6">
+          <TableSkeleton rows={4} />
+        </div>
+      ) : breakdown.length === 0 && !breakdownError ? (
+        <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+          <EmptyIcon />
+          <p className="text-sm text-gray-500">No latency data available for this time range.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
+                <th className="px-6 py-3 text-left">API Name</th>
+                <th className="px-4 py-3 text-right">Requests</th>
+                <th className="px-4 py-3 text-right">Avg Total</th>
+                <th className="px-4 py-3 text-left min-w-[160px]">Avg Upstream</th>
+                <th className="px-4 py-3 text-left min-w-[160px]">Avg Gateway</th>
+                <th className="px-4 py-3 text-right">P95 Total</th>
+                <th className="px-4 py-3 text-right">Max Total</th>
+                <th className="px-4 py-3 text-center">Samples</th>
+              </tr>
+            </thead>
+            <tbody>
+              {breakdown.map((row) => {
+                const isExpanded = expandedApiId === row.apiId;
+                const isLoadingSamples = loadingSamplesFor === row.apiId;
+                const avgTotal = row.avgTotalMs ?? 0;
+                const avgUpstream = row.avgUpstreamMs ?? 0;
+                const avgGateway = row.avgGatewayMs ?? 0;
+                return (
+                  <>
+                    <tr
+                      key={row.apiId}
+                      className={`border-b border-gray-100 transition-colors ${isExpanded ? 'bg-indigo-50/40' : 'hover:bg-gray-50/60'}`}
+                    >
+                      <td className="px-6 py-3 font-medium text-gray-900">
+                        {row.apiName || row.apiId}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                        {(row.totalRequests ?? 0).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-800">
+                        {avgTotal.toFixed(1)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="w-12 text-right tabular-nums text-xs text-blue-600">
+                            {avgUpstream.toFixed(1)}ms
+                          </span>
+                          <div className="flex-1">
+                            <LatencyBar upstreamMs={avgUpstream} gatewayMs={avgGateway} height={6} />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="w-12 text-right tabular-nums text-xs text-orange-500">
+                            {avgGateway.toFixed(1)}ms
+                          </span>
+                          <div className="flex-1">
+                            <LatencyBar upstreamMs={avgGateway} gatewayMs={avgUpstream} height={6} />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-gray-600">
+                        {(row.p95TotalMs ?? 0).toFixed(1)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-gray-600">
+                        {(row.maxTotalMs ?? 0).toFixed(0)}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <button
+                          onClick={() => handleToggleExpand(row.apiId)}
+                          className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1 ${
+                            isExpanded
+                              ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          {isLoadingSamples ? (
+                            <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                            </svg>
+                          ) : (
+                            <svg
+                              className={`h-3 w-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth={2.5}
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
+                          )}
+                          {isExpanded ? 'Collapse' : 'Expand'}
+                        </button>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr key={`${row.apiId}-samples`} className="bg-indigo-50/20">
+                        <td colSpan={8} className="px-6 py-3">
+                          <div className="rounded-lg border border-indigo-100 bg-white shadow-inner">
+                            <div className="border-b border-gray-100 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                              Recent Request Samples — {row.apiName || row.apiId}
+                            </div>
+                            <RequestSamplesTable
+                              samples={samplesMap[row.apiId] ?? []}
+                              loading={isLoadingSamples}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -456,6 +797,9 @@ export default function AnalyticsPage() {
           )}
         </div>
       </div>
+
+      {/* ---- Latency Breakdown by API ---- */}
+      <LatencyBreakdownSection range={range} />
     </div>
   );
 }
