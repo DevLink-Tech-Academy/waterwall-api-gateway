@@ -67,6 +67,13 @@ public class BotDetectionFilter implements Filter {
         HttpServletRequest request = (HttpServletRequest) servletRequest;
         HttpServletResponse response = (HttpServletResponse) servletResponse;
 
+        // Skip bot detection for requests with valid API key — these are legitimate programmatic clients
+        String apiKey = request.getHeader("X-API-Key");
+        if (apiKey != null && !apiKey.isBlank()) {
+            chain.doFilter(servletRequest, servletResponse);
+            return;
+        }
+
         String userAgent = request.getHeader("User-Agent");
         String ip = extractClientIp(request);
 
