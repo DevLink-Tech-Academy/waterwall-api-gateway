@@ -61,16 +61,20 @@ public class AccessLogFilter implements Filter {
             return;
         }
 
-        ContentCachingResponseWrapper responseWrapper = new ContentCachingResponseWrapper(response);
         long startTime = System.currentTimeMillis();
         long requestSize = request.getContentLengthLong() > 0 ? request.getContentLengthLong() : 0;
 
         try {
-            filterChain.doFilter(request, responseWrapper);
+            filterChain.doFilter(request, response);
         } finally {
             long totalLatencyMs = System.currentTimeMillis() - startTime;
-            int statusCode = responseWrapper.getStatus();
-            long responseSize = responseWrapper.getContentSize();
+            int statusCode = response.getStatus();
+            // Get response size from Content-Length header instead of buffering entire body
+            long responseSize = 0;
+            String contentLength = response.getHeader("Content-Length");
+            if (contentLength != null) {
+                try { responseSize = Long.parseLong(contentLength); } catch (NumberFormatException ignored) {}
+            }
 
             // Upstream latency (set by ProxyController); 0 if not proxied
             long upstreamLatencyMs = 0;
@@ -93,8 +97,6 @@ public class AccessLogFilter implements Filter {
                 log.error("AccessLogFilter: failed to log request: {}", ex.getMessage());
             }
 
-            // IMPORTANT: copy the cached body to the actual response output stream
-            responseWrapper.copyBodyToResponse();
         }
     }
 }
