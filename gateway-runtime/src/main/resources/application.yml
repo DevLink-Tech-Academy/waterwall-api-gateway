@@ -1,5 +1,12 @@
 server:
   port: ${GATEWAY_HTTP_PORT:8080}
+  tomcat:
+    accept-count: 500
+    max-connections: 2000
+    threads:
+      max: 400
+      min-spare: 50
+    connection-timeout: 5000
 
 spring:
   application:
