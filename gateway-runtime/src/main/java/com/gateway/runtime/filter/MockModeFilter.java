@@ -39,6 +39,11 @@ public class MockModeFilter implements Filter {
     private final JdbcTemplate gatewayJdbcTemplate;
     private final ObjectMapper objectMapper;
 
+    // Cache mock-enabled status per API (30s TTL) to avoid DB hit per request
+    private final java.util.concurrent.ConcurrentHashMap<UUID, CachedMockStatus> mockStatusCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long MOCK_CACHE_TTL_MS = 30_000;
+    private record CachedMockStatus(boolean enabled, long expiresAt) {}
+
     @Override
     public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain)
             throws IOException, ServletException {
@@ -108,11 +113,19 @@ public class MockModeFilter implements Filter {
     }
 
     private boolean isMockEnabledForApi(UUID apiId) {
+        long now = System.currentTimeMillis();
+        CachedMockStatus cached = mockStatusCache.get(apiId);
+        if (cached != null && now < cached.expiresAt()) {
+            return cached.enabled();
+        }
         try {
             String sql = "SELECT COUNT(*) FROM gateway.mock_configs WHERE api_id = ? AND mock_enabled = true";
             Integer count = gatewayJdbcTemplate.queryForObject(sql, Integer.class, apiId);
-            return count != null && count > 0;
+            boolean enabled = count != null && count > 0;
+            mockStatusCache.put(apiId, new CachedMockStatus(enabled, now + MOCK_CACHE_TTL_MS));
+            return enabled;
         } catch (Exception e) {
+            mockStatusCache.put(apiId, new CachedMockStatus(false, now + MOCK_CACHE_TTL_MS));
             log.debug("Failed to check mock mode for apiId={}: {}", apiId, e.getMessage());
             return false;
         }
