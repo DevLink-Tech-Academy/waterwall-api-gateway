@@ -694,8 +694,10 @@ export default function BillingPage() {
         {[
           { label: 'API Calls This Month', value: summary ? summary.requestsThisMonth.toLocaleString() : '--', icon: '\u{1F4CA}' },
           { label: 'Avg Latency', value: summary ? `${Math.round(summary.averageLatencyMs)} ms` : '--', icon: '\u{26A1}' },
-          { label: 'Error Rate', value: summary ? `${(summary.errorRate * 100).toFixed(2)}%` : '--', icon: summary && summary.errorRate > 0.05 ? '\u{26A0}\u{FE0F}' : '\u{2705}' },
-          { label: 'Estimated Cost', value: cost ? fmtCurrency(cost.estimatedCost, cost.currency) : '--', icon: '\u{1F4B5}' },
+          { label: 'Error Rate', value: summary ? `${summary.errorRate.toFixed(2)}%` : '--', icon: summary && summary.errorRate > 5 ? '\u{26A0}\u{FE0F}' : '\u{2705}' },
+          billingMode === 'PAY_AS_YOU_GO'
+            ? { label: 'Wallet Balance', value: wallet ? fmtCurrency(wallet.balance, wallet.currency) : '--', icon: '\u{1F4B0}' }
+            : { label: 'Estimated Cost', value: cost ? fmtCurrency(cost.estimatedCost, cost.currency) : '--', icon: '\u{1F4B5}' },
         ].map((stat) => (
           <div key={stat.label} style={{
             backgroundColor: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', padding: 20,
@@ -775,8 +777,8 @@ export default function BillingPage() {
                       <td style={{ ...tdStyle, fontWeight: 600 }}>{api.apiName}</td>
                       <td style={{ ...tdStyle, textAlign: 'right' }}>{api.totalRequests.toLocaleString()}</td>
                       <td style={{ ...tdStyle, textAlign: 'right' }}>{Math.round(api.averageLatencyMs)} ms</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', color: api.errorRate > 0.05 ? '#dc2626' : '#16a34a' }}>
-                        {(api.errorRate * 100).toFixed(2)}%
+                      <td style={{ ...tdStyle, textAlign: 'right', color: api.errorRate > 5 ? '#dc2626' : '#16a34a' }}>
+                        {api.errorRate.toFixed(2)}%
                       </td>
                     </tr>
                   ))}
