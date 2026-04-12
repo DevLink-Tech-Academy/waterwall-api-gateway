@@ -188,6 +188,14 @@ public class WafFilter implements Filter {
             return;
         }
 
+        // Skip WAF for API-key authenticated requests — they're legitimate programmatic clients
+        // WAF regex scanning adds latency; authenticated clients don't need it
+        String apiKey = request.getHeader("X-API-Key");
+        if (apiKey != null && !apiKey.isBlank()) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         String clientIp = extractClientIp(request);
 
         // Check URL (decoded URI)

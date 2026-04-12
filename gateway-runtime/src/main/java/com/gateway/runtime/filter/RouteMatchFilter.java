@@ -29,7 +29,7 @@ import java.util.List;
  */
 @Slf4j
 @Component
-@Order(30)
+@Order(5)
 @RequiredArgsConstructor
 public class RouteMatchFilter implements Filter {
 

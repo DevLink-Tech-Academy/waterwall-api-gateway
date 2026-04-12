@@ -31,7 +31,7 @@ import java.util.UUID;
  */
 @Slf4j
 @Component
-@Order(5)
+@Order(9)
 public class SecurityHeadersFilter implements Filter {
 
     @Value("${gateway.runtime.security.headers.hsts-max-age:31536000}")
