@@ -94,10 +94,10 @@ public class WalletService {
     }
 
     @Transactional(readOnly = true)
-    public Page<WalletTransactionEntity> getTransactions(Pageable pageable) {
+    public Page<com.gateway.management.entity.LedgerEntryEntity> getTransactions(Pageable pageable) {
         UUID consumerId = resolveConsumerId();
         WalletEntity wallet = getOrCreateWallet(consumerId);
-        return walletTransactionRepository.findByWalletIdOrderByCreatedAtDesc(wallet.getId(), pageable);
+        return ledgerService.getTransactions(wallet.getId(), pageable);
     }
 
     @Transactional

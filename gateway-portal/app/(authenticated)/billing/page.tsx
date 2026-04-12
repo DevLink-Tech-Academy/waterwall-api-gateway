@@ -148,7 +148,7 @@ export default function BillingPage() {
 
   // Wallet state
   const [wallet, setWallet] = useState<{ id: string; balance: number; currency: string; autoTopUpEnabled: boolean; autoTopUpThreshold: number; autoTopUpAmount: number; lowBalanceThreshold: number } | null>(null);
-  const [walletTxns, setWalletTxns] = useState<{ content: { id: string; type: string; amount: number; currency: string; description: string; balanceAfter: number; createdAt: string }[] }>({ content: [] });
+  const [walletTxns, setWalletTxns] = useState<{ content: { id: string; entryType: string; category: string; amount: number; currency: string; description: string; runningBalance: number; createdAt: string }[] }>({ content: [] });
   const [topUpAmount, setTopUpAmount] = useState('');
   const [topUpLoading, setTopUpLoading] = useState(false);
 
@@ -1204,16 +1204,19 @@ export default function BillingPage() {
                           <td style={tdStyle}>
                             <span style={{
                               padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600,
-                              backgroundColor: txn.type === 'CREDIT' ? '#dcfce7' : '#fee2e2',
-                              color: txn.type === 'CREDIT' ? '#16a34a' : '#dc2626',
-                            }}>{txn.type}</span>
+                              backgroundColor: txn.entryType === 'CREDIT' || txn.entryType === 'BALANCE_BF' ? '#dcfce7' : '#fee2e2',
+                              color: txn.entryType === 'CREDIT' || txn.entryType === 'BALANCE_BF' ? '#16a34a' : '#dc2626',
+                            }}>{txn.entryType}</span>
                           </td>
-                          <td style={tdStyle}>{txn.description}</td>
+                          <td style={tdStyle}>
+                            <div>{txn.description}</div>
+                            <div style={{ fontSize: 11, color: '#94a3b8' }}>{txn.category}</div>
+                          </td>
                           <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600,
-                            color: txn.type === 'CREDIT' ? '#16a34a' : '#dc2626' }}>
-                            {txn.type === 'CREDIT' ? '+' : '-'}{fmtCurrency(txn.amount, txn.currency)}
+                            color: txn.entryType === 'CREDIT' || txn.entryType === 'BALANCE_BF' ? '#16a34a' : '#dc2626' }}>
+                            {txn.entryType === 'CREDIT' || txn.entryType === 'BALANCE_BF' ? '+' : '-'}{fmtCurrency(txn.amount, txn.currency)}
                           </td>
-                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtCurrency(txn.balanceAfter, txn.currency)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtCurrency(txn.runningBalance, txn.currency)}</td>
                           <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtDate(txn.createdAt)}</td>
                         </tr>
                       ))}
