@@ -1,0 +1,16 @@
+databaseChangeLog:
+  - changeSet:
+      id: gw-053-add-latency-breakdown-columns
+      author: gateway-team
+      comment: Split latency into upstream and gateway for performance debugging
+      changes:
+        - addColumn:
+            schemaName: analytics
+            tableName: request_logs
+            columns:
+              - column:
+                  name: upstream_latency_ms
+                  type: int
+              - column:
+                  name: gateway_latency_ms
+                  type: int

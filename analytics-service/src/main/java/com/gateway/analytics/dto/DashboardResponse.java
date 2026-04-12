@@ -16,6 +16,8 @@ public class DashboardResponse {
     private long totalRequests;
     private double avgLatencyMs;
     private double avgLatency;  // alias for frontend compatibility
+    private double avgUpstreamLatencyMs;
+    private double avgGatewayLatencyMs;
     private double errorRate;
     private long activeApis;
     private Map<String, Long> statusCodeBreakdown;

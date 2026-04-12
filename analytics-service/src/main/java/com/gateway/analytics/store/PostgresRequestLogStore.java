@@ -69,6 +69,8 @@ public class PostgresRequestLogStore implements RequestLogStore {
             SELECT
                 COUNT(*) AS total_requests,
                 COALESCE(AVG(latency_ms), 0) AS avg_latency,
+                COALESCE(AVG(upstream_latency_ms), 0) AS avg_upstream_latency,
+                COALESCE(AVG(gateway_latency_ms), 0) AS avg_gateway_latency,
                 COALESCE(
                     COUNT(*) FILTER (WHERE status_code >= 400) * 100.0 / NULLIF(COUNT(*), 0),
                     0
@@ -82,6 +84,8 @@ public class PostgresRequestLogStore implements RequestLogStore {
 
         long totalRequests = ((Number) stats.get("total_requests")).longValue();
         double avgLatency = ((Number) stats.get("avg_latency")).doubleValue();
+        double avgUpstreamLatency = ((Number) stats.get("avg_upstream_latency")).doubleValue();
+        double avgGatewayLatency = ((Number) stats.get("avg_gateway_latency")).doubleValue();
         double errorRate = ((Number) stats.get("error_rate")).doubleValue();
         long activeApis = ((Number) stats.get("active_apis")).longValue();
 
@@ -90,6 +94,8 @@ public class PostgresRequestLogStore implements RequestLogStore {
                 .totalRequests(totalRequests)
                 .avgLatencyMs(roundedLatency)
                 .avgLatency(roundedLatency)
+                .avgUpstreamLatencyMs(Math.round(avgUpstreamLatency * 100.0) / 100.0)
+                .avgGatewayLatencyMs(Math.round(avgGatewayLatency * 100.0) / 100.0)
                 .errorRate(Math.round(errorRate * 100.0) / 100.0)
                 .activeApis(activeApis)
                 .statusCodeBreakdown(getStatusCodeBreakdown(interval))

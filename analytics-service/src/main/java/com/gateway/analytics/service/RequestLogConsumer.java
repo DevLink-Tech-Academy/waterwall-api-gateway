@@ -55,6 +55,8 @@ public class RequestLogConsumer {
                     .path(textOrNull(json, "path"))
                     .statusCode(json.path("statusCode").asInt(0))
                     .latencyMs((int) json.path("latencyMs").asLong(0))
+                    .upstreamLatencyMs(json.has("upstreamLatencyMs") ? (int) json.path("upstreamLatencyMs").asLong(0) : null)
+                    .gatewayLatencyMs(json.has("gatewayLatencyMs") ? (int) json.path("gatewayLatencyMs").asLong(0) : null)
                     .requestSize(json.path("requestSize").asLong(0))
                     .responseSize(json.path("responseSize").asLong(0))
                     .authType(textOrNull(json, "authType"))

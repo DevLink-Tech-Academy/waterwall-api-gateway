@@ -60,6 +60,12 @@ public class RequestLogEntity {
     @Column(name = "latency_ms")
     private int latencyMs;
 
+    @Column(name = "upstream_latency_ms")
+    private Integer upstreamLatencyMs;
+
+    @Column(name = "gateway_latency_ms")
+    private Integer gatewayLatencyMs;
+
     @Column(name = "request_size")
     private long requestSize;
 
