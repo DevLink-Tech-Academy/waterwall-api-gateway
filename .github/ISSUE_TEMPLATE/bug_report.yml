@@ -1,0 +1,116 @@
+name: Bug report
+description: Report a problem with Waterwall so we can fix it
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill out the sections below so we can reproduce and fix the issue quickly.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A clear and concise description of the problem.
+      placeholder: When I do X, Y happens instead of Z.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: service
+    attributes:
+      label: Affected service
+      description: Which component is affected?
+      options:
+        - gateway-runtime
+        - identity-service
+        - management-api
+        - analytics-service
+        - notification-service
+        - gateway-portal (developer portal)
+        - gateway-admin (admin portal)
+        - common libraries
+        - deploy / docker / scripts
+        - docs
+        - not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps that reliably trigger the problem.
+      placeholder: |
+        1. Start services with `docker compose up -d`
+        2. Log in as `alice@acme-corp.com`
+        3. Click "Create API"
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: I expected the API to be created and appear in the catalog.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened? Include error messages and stack traces if you have them.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant logs from the affected service. Paste inside a code block.
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: Waterwall version
+      description: Release tag, commit SHA, or "main".
+      placeholder: v1.0.0 / commit abc1234 / main
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      options:
+        - Pre-built release (setup.sh)
+        - Build from source (setup.sh --build-from-source)
+        - Docker Compose
+        - Manual / local dev
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Ubuntu 24.04 / Windows 11 / macOS 14.5
+    validations:
+      required: true
+
+  - type: input
+    id: java
+    attributes:
+      label: Java version
+      placeholder: openjdk 21.0.3
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Screenshots, config snippets, related issues, or anything else that might help.

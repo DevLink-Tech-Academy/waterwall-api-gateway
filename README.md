@@ -1,17 +1,51 @@
 # Waterwall
 
-**A full-featured, open-source API Gateway Management Platform**
+> **The open-source API gateway platform that publishes, secures, monitors, and monetizes APIs — built on Java 21 virtual threads, deployable in 60 seconds.**
 
-<!-- Badges -->
-<!--
-[![Build Status](https://img.shields.io/github/actions/workflow/status/your-org/waterwall/ci.yml?branch=main)](https://github.com/your-org/waterwall/actions)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4-green.svg)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4-6DB33F.svg)](https://spring.io/projects/spring-boot)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
--->
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Code of Conduct](https://img.shields.io/badge/Contributor%20Covenant-2.1-purple.svg)](CODE_OF_CONDUCT.md)
 
-Waterwall is a production-grade API gateway platform for publishing, securing, monitoring, and monetizing APIs. It provides a complete API lifecycle management solution with an admin portal, a developer portal, real-time analytics, and a high-performance request proxy -- comparable to platforms like WSO2 API Manager and Kong.
+Waterwall is a **full API lifecycle management platform** — not just a proxy. It ships with an admin portal, a developer portal, real-time analytics, pricing plans, billing, and a high-performance request runtime. Think WSO2 API Manager or Kong Enterprise, but open source, Java 21-native, and deployable on a single machine.
+
+## ⚡ Performance
+
+Single-machine benchmark — all 7 services, PostgreSQL, and RabbitMQ on one box (Windows 11, AMD Ryzen 9 7945HX, 32 GB RAM), measured with [Vegeta](https://github.com/tsenart/vegeta):
+
+| Rate | Success | p50 | p95 | p99 |
+|---:|:---:|---:|---:|---:|
+| **1,000 rps** | 100% | 1.5 ms | 8.0 ms | 20.8 ms |
+| **2,000 rps** | 100% | 1.3 ms | 8.0 ms | 20.1 ms |
+| **3,000 rps** | 100% | 3.5 ms | 22.0 ms | 34.6 ms |
+| **4,000 rps** | 100% | 8.5 ms | 30.5 ms | 65.3 ms |
+
+100% success rate up to 4,000 rps with sub-10ms median latency — on a laptop. See the full table and optimization notes in the [Performance section](#performance).
+
+## Why Waterwall?
+
+|  | Waterwall | Kong OSS | WSO2 APIM | Gravitee CE | Tyk OSS |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Admin portal UI | ✅ | Enterprise only | ✅ | ✅ | Dashboard is paid |
+| Developer portal UI | ✅ | Enterprise only | ✅ | ✅ | Paid |
+| Built-in monetization & billing | ✅ | ❌ | ✅ | Enterprise only | ❌ |
+| Real-time analytics + SLA monitoring | ✅ | Enterprise only | ✅ | ✅ | Enterprise only |
+| Custom Java 21 virtual-thread data plane | ✅ | N/A (Lua/Go) | ❌ | ❌ | N/A (Go) |
+| Single-command deploy | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Fully open source (Apache 2.0) | ✅ | Partial | Partial | Partial | Partial |
+
+> **Data plane:** Waterwall's `gateway-runtime` is a custom reverse proxy built on Spring Boot + Tomcat with Java 21 virtual threads and Apache HttpClient 5 connection pooling — no Spring Cloud Gateway, no Netty WebFlux. Owning the hot path is what makes optimizations like the lock-free circuit breaker, async access logging, and the virtual-thread pinning fix possible. A separate Netty port on 9090 handles gRPC.
+
+## Quickstart (60 seconds)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DevLink-Tech-Academy/waterwall-api-gateway/main/setup.sh -o setup.sh
+sudo bash setup.sh
+```
+
+Then open **http://localhost:3001** (admin) or **http://localhost:3000** (developer portal). Default login: `admin@gateway.local` / `changeme`. Full install options in [Getting Started](#getting-started).
 
 ---
 
@@ -202,7 +236,7 @@ sudo bash setup.sh --no-clone
 
 > On Linux/macOS, all prerequisites are installed automatically. On Windows, the script prints download links for any missing tools.
 
-### Option 2: Docker Compose (all-in-Docker)
+### Option 3: Docker Compose (all-in-Docker)
 
 Runs everything in containers. Only requires Docker.
 
@@ -221,7 +255,7 @@ docker compose down        # Stop containers (keep data)
 docker compose down -v     # Stop containers and delete all data
 ```
 
-### Option 3: Manual Setup (services run locally)
+### Option 4: Manual Setup (services run locally)
 
 For contributors who want to run services individually with hot reload.
 
@@ -344,18 +378,15 @@ cd gateway-admin && npx next start -p 3001 &
 |---|---|---|
 | Super Admin | `admin@gateway.local` | `changeme` |
 
-**Sample users** (seeded in dev/uat):
+**Sample users** (seeded in dev/uat only — all share the password `password123`):
 
-| Name | Email | Password | Org | Role |
-|---|---|---|---|---|
-| Alice Chen | `alice@acme-corp.com` | `password123` | Acme Corp | API_PUBLISHER_ADMIN |
-| Bob Martinez | `bob@acme-corp.com` | `password123` | Acme Corp | API_PUBLISHER |
-| Carol Nguyen | `carol@globex.io` | `password123` | Globex Industries | PLATFORM_ADMIN |
-| Dave Wilson | `dave@globex.io` | `password123` | Globex Industries | DEVELOPER |
-| Eve Tanaka | `eve@initech.dev` | `password123` | Initech Solutions | API_PUBLISHER_ADMIN |
-| Frank Mueller | `frank@initech.dev` | `password123` | Initech Solutions | DEVELOPER |
-| Grace Lee | `grace@example.com` | `password123` | — | VIEWER |
-| Heidi Olsen | `heidi@example.com` | `password123` | Acme Corp | AUDITOR |
+| Email | Role | What to explore |
+|---|---|---|
+| `alice@acme-corp.com` | `API_PUBLISHER_ADMIN` | Publishing APIs, managing team subscriptions |
+| `carol@globex.io` | `PLATFORM_ADMIN` | Admin portal, analytics, user management |
+| `dave@globex.io` | `DEVELOPER` | Developer portal, Try-It console, subscriptions |
+
+Additional seeded users for every role (`API_PUBLISHER`, `VIEWER`, `AUDITOR`, etc.) are defined in `db-changelog/` seed files. These accounts exist **only in dev and UAT profiles** and are never created in production.
 
 ---
 
@@ -395,7 +426,7 @@ Copy `.env.example` to `.env` for production deployments and fill in your values
 
 ### Standard Mode (PostgreSQL only)
 
-Best for most deployments handling up to **~5,000 requests/second**. All data is stored in PostgreSQL.
+The default mode — suitable for most deployments. All data (including analytics) is stored in PostgreSQL.
 
 ```bash
 cd deploy/docker
@@ -404,7 +435,7 @@ docker compose up -d
 
 ### High-Throughput Mode (PostgreSQL + ClickHouse)
 
-For deployments targeting **10,000 - 50,000+ requests/second**, enable [ClickHouse](https://clickhouse.com/) as the analytics backend.
+For deployments with very high analytics ingestion volume (billions of request logs, long retention windows, or heavy ad-hoc reporting), enable [ClickHouse](https://clickhouse.com/) as the analytics backend while keeping everything else in PostgreSQL.
 
 #### Why ClickHouse?
 
@@ -471,12 +502,16 @@ All other services are completely unaffected — they always use PostgreSQL.
 
 ## Performance
 
-Waterwall uses Java 21 Virtual Threads for high-concurrency request handling. We load-tested the gateway with [Vegeta](https://github.com/tsenart/vegeta) running all 7 services, PostgreSQL, and RabbitMQ on a single machine.
+Waterwall's `gateway-runtime` is a custom reverse proxy built on Spring Boot + Tomcat with Java 21 virtual threads and Apache HttpClient 5 connection pooling. Owning the hot path end-to-end enabled the optimizations below.
 
-### Results (Windows 11 — AMD Ryzen 9 7945HX, 32 GB RAM)
+### Benchmark setup
+
+Load-tested with [Vegeta](https://github.com/tsenart/vegeta) running all 7 services, PostgreSQL, and RabbitMQ **on a single machine** (Windows 11, AMD Ryzen 9 7945HX, 32 GB RAM).
+
+### Full results
 
 | Rate | Success | p50 | p95 | p99 | Total Requests |
-|---|---|---|---|---|---|
+|---:|:---:|---:|---:|---:|---:|
 | 100 rps | 100% | 1.2 ms | 3.3 ms | 12.5 ms | 1,500 |
 | 500 rps | 100% | 1.1 ms | 4.2 ms | 9.9 ms | 7,500 |
 | 1,000 rps | 100% | 1.5 ms | 8.0 ms | 20.8 ms | 15,000 |
@@ -484,14 +519,17 @@ Waterwall uses Java 21 Virtual Threads for high-concurrency request handling. We
 | 3,000 rps | 100% | 3.5 ms | 22.0 ms | 34.6 ms | 45,000 |
 | 4,000 rps | 100% | 8.5 ms | 30.5 ms | 65.3 ms | 60,000 |
 
-**Key optimizations:**
-- Virtual thread pinning fix — moved RabbitMQ publishing to dedicated platform thread pools (9x throughput improvement)
-- Lock-free route configuration — volatile references to immutable collections
-- Async access logging — decoupled from the request hot path
-- Backpressure filter — 503 + Retry-After instead of connection drops
-- Early route rejection — moved route matching to filter Order 5
+100% success rate from 100 up to 4,000 rps, with sub-millisecond-to-single-digit-millisecond medians across the range — on a single laptop running **every component** of the stack.
 
-> **Linux benchmarks coming soon.** The above results are from Windows. We expect significantly higher throughput on Linux with kernel-level optimizations (epoll, TCP tuning, cgroup isolation).
+### Key optimizations
+
+- **Virtual-thread pinning fix** — moved RabbitMQ publishing to dedicated platform thread pools, eliminating carrier-thread starvation on synchronized AMQP blocks
+- **Lock-free route configuration** — volatile references to immutable collections, no read contention on the hot path
+- **Async access logging** — fully decoupled from the request lifecycle
+- **Backpressure filter** — returns `503 Retry-After` under overload instead of dropping connections
+- **Early route rejection** — unmatched routes fail at filter order 5, before any heavy work
+
+Benchmarks were run on Windows. Contributions of Linux benchmark data are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

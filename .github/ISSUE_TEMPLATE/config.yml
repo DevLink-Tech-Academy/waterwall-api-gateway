@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://waterwall.dev/docs/index.html
+    about: Setup, configuration, and usage guides.
+  - name: Discussions
+    url: https://github.com/DevLink-Tech-Academy/waterwall-api-gateway/discussions
+    about: Ask questions, share ideas, and get help from the community.
+  - name: Report a security issue
+    url: https://github.com/DevLink-Tech-Academy/waterwall-api-gateway/security/advisories/new
+    about: Please report security issues privately — do not open a public issue.
