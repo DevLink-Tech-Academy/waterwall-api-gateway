@@ -10,17 +10,22 @@ image:
 # SPRING_PROFILES_ACTIVE for the Java services
 springProfile: prod
 
-# ── Secrets (override in production) ─────────────────────────────────────────
+# ── Secrets ──────────────────────────────────────────────────────────────────
+# Leave blank to auto-generate a strong random password on first install and
+# reuse it on upgrades (see templates/config.yaml). Set explicitly to pin a
+# value (e.g. when wiring to an external store).
 secrets:
-  dbPassword: postgres
-  rabbitmqPassword: guest
+  dbPassword: ""
+  rabbitmqPassword: ""
   clickhousePassword: ""
 
 # ── Shared backend config ────────────────────────────────────────────────────
 config:
   dbName: gateway
-  dbUsername: postgres
-  rabbitmqUsername: guest
+  dbUsername: gateway
+  # Non-'guest' user: RabbitMQ restricts the built-in guest to loopback, and
+  # guest/guest is a weak default.
+  rabbitmqUsername: gateway
   rabbitmqVhost: "/cem"
   clickhouseDb: gateway_analytics
   clickhouseUser: default

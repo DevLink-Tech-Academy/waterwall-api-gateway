@@ -1,3 +1,20 @@
+{{/*
+  Resolve each password with precedence:
+    1. explicit value in .Values.secrets.*  (operator-provided)
+    2. the value already stored in the Secret (persist across upgrades)
+    3. a freshly generated strong random password
+  This avoids shipping weak defaults (postgres/guest/empty) while keeping
+  installs turnkey. NOTE: helm template (no cluster) always takes branch 3.
+*/}}
+{{- $sec := (lookup "v1" "Secret" .Release.Namespace "api-gateway-secrets") -}}
+{{- $data := dict -}}
+{{- if $sec }}{{- $data = $sec.data -}}{{- end -}}
+{{- $dbPw := .Values.secrets.dbPassword -}}
+{{- if not $dbPw }}{{- $dbPw = (or (get $data "db-password" | b64dec) (randAlphaNum 24)) -}}{{- end -}}
+{{- $mqPw := .Values.secrets.rabbitmqPassword -}}
+{{- if not $mqPw }}{{- $mqPw = (or (get $data "rabbitmq-password" | b64dec) (randAlphaNum 24)) -}}{{- end -}}
+{{- $chPw := .Values.secrets.clickhousePassword -}}
+{{- if not $chPw }}{{- $chPw = (or (get $data "clickhouse-password" | b64dec) (randAlphaNum 24)) -}}{{- end -}}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -6,9 +23,9 @@ metadata:
     app.kubernetes.io/part-of: api-gateway
 type: Opaque
 stringData:
-  db-password: {{ .Values.secrets.dbPassword | quote }}
-  rabbitmq-password: {{ .Values.secrets.rabbitmqPassword | quote }}
-  clickhouse-password: {{ .Values.secrets.clickhousePassword | quote }}
+  db-password: {{ $dbPw | quote }}
+  rabbitmq-password: {{ $mqPw | quote }}
+  clickhouse-password: {{ $chPw | quote }}
 ---
 apiVersion: v1
 kind: ConfigMap
