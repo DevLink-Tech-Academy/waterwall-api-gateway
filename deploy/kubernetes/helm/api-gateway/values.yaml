@@ -17,6 +17,9 @@ imagePullSecrets:
 
 # SPRING_PROFILES_ACTIVE for the Java services
 springProfile: prod
+# Hibernate ddl-auto: "update" (reconcile schema on boot, safe default) or
+# "validate"/"none" once the Liquibase changelogs match every JPA entity.
+jpaDdlAuto: update
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 # Leave blank to auto-generate a strong random password on first install and

@@ -28,6 +28,12 @@ imagePullSecrets:
 {{- define "api-gateway.backendEnv" -}}
 - name: SPRING_PROFILES_ACTIVE
   value: {{ .Values.springProfile | quote }}
+# Hibernate schema handling. Default "update" reconciles the JPA entities with
+# the Liquibase-managed schema on first boot — the prod profile's strict
+# "validate" fails if any changelog lags an entity (e.g. analytics.request_logs
+# missing gateway_latency_ms). Set to "validate" once the changelogs are in sync.
+- name: SPRING_JPA_HIBERNATE_DDL_AUTO
+  value: {{ .Values.jpaDdlAuto | default "update" | quote }}
 - name: DB_HOST
   value: "api-gateway-postgres"
 - name: DB_PORT
