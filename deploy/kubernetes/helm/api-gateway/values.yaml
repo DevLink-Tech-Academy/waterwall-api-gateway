@@ -45,13 +45,10 @@ backend:
   management-api:
     port: 8082
     extraEnv:
-      IDENTITY_SERVICE_URL: "http://identity-service:8081"
-      JWT_ISSUER_URI: "http://identity-service:8081"
+      IDENTITY_SERVICE_URL: "http://identity-service:8081"   # for identity API calls
   analytics-service:
     port: 8083
     clickhouse: true
-    extraEnv:
-      JWT_ISSUER_URI: "http://identity-service:8081"
   notification-service:
     port: 8084
   gateway-runtime:
@@ -59,7 +56,18 @@ backend:
     extraPorts: [9090]         # management/metrics
     extraEnv:
       IDENTITY_SERVICE_URL: "http://identity-service:8081"
-      JWT_ISSUER_URI: "http://identity-service:8081"
+
+# ── Keycloak / OIDC integration ──────────────────────────────────────────────
+# When enabled, the resource servers (management-api, analytics, notification,
+# gateway-runtime) validate JWTs against Keycloak instead of the built-in
+# identity-service — i.e. the whole platform trusts BDP's Keycloak identity.
+# The services only require an authenticated valid token (@PreAuthorize
+# isAuthenticated), so any Keycloak-issued JWT is accepted; no role converter
+# is needed. issuerUri = the realm issuer, e.g.
+#   http://<keycloak-host>:8080/realms/bdp
+keycloak:
+  enabled: false
+  issuerUri: ""
 
 # ── Frontend Next.js apps ────────────────────────────────────────────────────
 # NOTE: NEXT_PUBLIC_* are read by the browser, so they must be reachable

@@ -22,6 +22,14 @@ spec:
             {{- end }}
           env:
             {{- include "api-gateway.backendEnv" $ | nindent 12 }}
+            - name: JWT_ISSUER_URI
+              {{- if eq $name "identity-service" }}
+              value: "http://identity-service:8081"   # the IdP issues as itself
+              {{- else if $.Values.keycloak.enabled }}
+              value: {{ $.Values.keycloak.issuerUri | required "keycloak.issuerUri is required when keycloak.enabled" | quote }}
+              {{- else }}
+              value: "http://identity-service:8081"
+              {{- end }}
             {{- range $k, $v := $svc.extraEnv }}
             - { name: {{ $k }}, value: {{ $v | quote }} }
             {{- end }}

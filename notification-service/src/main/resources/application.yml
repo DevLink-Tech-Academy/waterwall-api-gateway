@@ -56,7 +56,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${IDENTITY_SERVICE_URL:http://localhost:8081}
+          issuer-uri: ${JWT_ISSUER_URI:${IDENTITY_SERVICE_URL:http://localhost:8081}}
 
   jackson:
     serialization:
