@@ -41,10 +41,16 @@ WORKDIR /app
 COPY --from=build /app/${APP_NAME}/.next/standalone ./
 COPY --from=build /app/${APP_NAME}/.next/static ${APP_NAME}/.next/static
 COPY --from=build /app/${APP_NAME}/public ${APP_NAME}/public/
+COPY deploy/docker/nextjs-entrypoint.sh /entrypoint.sh
+# Entrypoint needs to (re)write public/__env.js at start, and the monorepo
+# standalone server.js lives at /app/${APP_NAME}/server.js — the entrypoint runs
+# it. chown the app dir so the non-root user can write __env.js.
+RUN chmod +x /entrypoint.sh && chown -R gateway:gateway /app/${APP_NAME}
 
 USER gateway
+ENV APP_NAME=${APP_NAME}
 ENV PORT=${PORT}
 ENV HOSTNAME=0.0.0.0
 EXPOSE ${PORT}
 
-CMD ["node", "server.js"]
+ENTRYPOINT ["/entrypoint.sh"]

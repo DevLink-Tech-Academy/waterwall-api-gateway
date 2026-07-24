@@ -23,6 +23,10 @@ spec:
             {{- range $k, $v := $app.env }}
             - { name: {{ $k }}, value: {{ $v | quote }} }
             {{- end }}
+            {{- if $.Values.keycloak.enabled }}
+            - { name: NEXT_PUBLIC_KEYCLOAK_ISSUER, value: {{ $.Values.keycloak.issuerUri | quote }} }
+            - { name: NEXT_PUBLIC_KEYCLOAK_CLIENT_ID, value: "gateway-ui" }
+            {{- end }}
           readinessProbe:
             tcpSocket: { port: {{ $app.port }} }
             initialDelaySeconds: 15

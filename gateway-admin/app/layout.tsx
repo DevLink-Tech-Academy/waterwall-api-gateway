@@ -21,6 +21,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        {/* Runtime config (window.__ENV) written by the container entrypoint,
+            so a single image can be configured per deployment. */}
+        <script src="/__env.js" />
+      </head>
       <body className="min-h-screen bg-slate-50">
         <AppShell>{children}</AppShell>
       </body>

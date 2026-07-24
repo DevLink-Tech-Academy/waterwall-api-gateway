@@ -17,6 +17,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        {/* Runtime config (window.__ENV) written by the container entrypoint,
+            so a single image can be configured per deployment. */}
+        <script src="/__env.js" />
+      </head>
       <body>{children}</body>
     </html>
   );
