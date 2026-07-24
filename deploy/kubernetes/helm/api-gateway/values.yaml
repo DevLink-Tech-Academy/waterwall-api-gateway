@@ -2,10 +2,18 @@
 # Full app image = {registry}/{repository}/{component}:{tag}
 # e.g. bdpmarketplace.azurecr.io/api-gateway/identity-service:1.0.0
 image:
-  registry: ""            # air-gap: set to the marketplace ACR; empty = docker.io
+  # These images are published to the marketplace ACR; default to it so the
+  # chart is self-consistent. Override for a different registry.
+  registry: "bdpmarketplace.azurecr.io"
   repository: api-gateway
   tag: "1.0.0"
   pullPolicy: IfNotPresent
+
+# Pull secret(s) for the (private) app-image registry. BDP provisions the
+# 'bdp-airgap-registry' secret in the install namespace; set [] if the registry
+# allows anonymous pulls or node-level creds are configured.
+imagePullSecrets:
+  - name: bdp-airgap-registry
 
 # SPRING_PROFILES_ACTIVE for the Java services
 springProfile: prod

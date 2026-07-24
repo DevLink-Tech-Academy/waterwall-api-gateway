@@ -6,6 +6,14 @@
 {{- if $reg -}}{{ $reg }}/{{ $repo }}/{{ .name }}:{{ $tag }}{{- else -}}{{ $repo }}/{{ .name }}:{{ $tag }}{{- end -}}
 {{- end -}}
 
+{{/* imagePullSecrets block (empty when none configured) */}}
+{{- define "api-gateway.pullSecrets" -}}
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+{{ toYaml . }}
+{{- end }}
+{{- end -}}
+
 {{/* Infra image, optionally redirected to {registry}/tools/* for air-gap */}}
 {{- define "api-gateway.infraImage" -}}
 {{- if and .root.Values.airgapInfra .root.Values.image.registry -}}

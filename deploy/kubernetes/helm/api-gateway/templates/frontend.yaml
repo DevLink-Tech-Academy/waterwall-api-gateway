@@ -11,6 +11,7 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/part-of: api-gateway }
     spec:
+      {{- include "api-gateway.pullSecrets" $ | nindent 6 }}
       containers:
         - name: {{ $name }}
           image: {{ include "api-gateway.image" (dict "root" $ "name" $name) }}
