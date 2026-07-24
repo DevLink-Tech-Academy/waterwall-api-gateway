@@ -39,9 +39,17 @@ metadata:
   name: {{ $name }}
   labels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/part-of: api-gateway }
 spec:
+  {{- if $app.nodePort }}
+  type: NodePort
+  {{- end }}
   selector: { app.kubernetes.io/name: {{ $name }} }
   ports:
-    - { name: http, port: {{ $app.port }}, targetPort: {{ $app.port }} }
+    - name: http
+      port: {{ $app.port }}
+      targetPort: {{ $app.port }}
+      {{- if $app.nodePort }}
+      nodePort: {{ $app.nodePort }}
+      {{- end }}
 ---
 {{- end }}
 {{- if .Values.ingress.enabled }}

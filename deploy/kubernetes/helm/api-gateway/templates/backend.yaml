@@ -62,9 +62,17 @@ metadata:
   name: {{ $name }}
   labels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/part-of: api-gateway }
 spec:
+  {{- if $svc.nodePort }}
+  type: NodePort
+  {{- end }}
   selector: { app.kubernetes.io/name: {{ $name }} }
   ports:
-    - { name: http, port: {{ $svc.port }}, targetPort: {{ $svc.port }} }
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: {{ $svc.port }}
+      {{- if $svc.nodePort }}
+      nodePort: {{ $svc.nodePort }}
+      {{- end }}
     {{- range $svc.extraPorts }}
     - { name: port-{{ . }}, port: {{ . }}, targetPort: {{ . }} }
     {{- end }}

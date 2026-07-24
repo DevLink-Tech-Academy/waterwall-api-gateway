@@ -65,6 +65,7 @@ backend:
   gateway-runtime:
     port: 8080
     extraPorts: [9090]         # management/metrics
+    nodePort: 30820            # exposed so the BDP UI can show the Gateway URL
     extraEnv:
       IDENTITY_SERVICE_URL: "http://identity-service:8081"
 
@@ -87,12 +88,14 @@ keycloak:
 frontend:
   gateway-portal:
     port: 3000
+    nodePort: 30830           # Developer Portal URL
     env:
       NEXT_PUBLIC_API_URL: "http://management-api:8082"
       NEXT_PUBLIC_IDENTITY_URL: "http://identity-service:8081"
       NEXT_PUBLIC_GATEWAY_URL: "http://gateway-runtime:8080"
   gateway-admin:
     port: 3001
+    nodePort: 30831           # Admin Console URL
     env:
       NEXT_PUBLIC_API_URL: "http://management-api:8082"
       NEXT_PUBLIC_IDENTITY_URL: "http://identity-service:8081"
