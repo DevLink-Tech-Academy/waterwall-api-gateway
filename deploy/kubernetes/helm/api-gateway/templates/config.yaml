@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: api-gateway-secrets
+  labels:
+    app.kubernetes.io/part-of: api-gateway
+type: Opaque
+stringData:
+  db-password: {{ .Values.secrets.dbPassword | quote }}
+  rabbitmq-password: {{ .Values.secrets.rabbitmqPassword | quote }}
+  clickhouse-password: {{ .Values.secrets.clickhousePassword | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-postgres-init
+  labels:
+    app.kubernetes.io/part-of: api-gateway
+data:
+  01-init-schemas.sql: |
+    -- Create schemas for each service
+    CREATE SCHEMA IF NOT EXISTS identity;
+    CREATE SCHEMA IF NOT EXISTS gateway;
+    CREATE SCHEMA IF NOT EXISTS analytics;
+    CREATE SCHEMA IF NOT EXISTS audit;
+    CREATE SCHEMA IF NOT EXISTS notification;

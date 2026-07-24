@@ -1,0 +1,145 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: api-gateway-postgres, labels: { app.kubernetes.io/part-of: api-gateway } }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: {{ .Values.postgres.storage }} } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway-postgres
+  labels: { app.kubernetes.io/name: api-gateway-postgres, app.kubernetes.io/part-of: api-gateway }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: api-gateway-postgres } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: api-gateway-postgres, app.kubernetes.io/part-of: api-gateway }
+    spec:
+      containers:
+        - name: postgres
+          image: {{ include "api-gateway.infraImage" (dict "root" $ "image" .Values.postgres.image) }}
+          env:
+            - { name: POSTGRES_DB, value: {{ .Values.config.dbName | quote }} }
+            - { name: POSTGRES_USER, value: {{ .Values.config.dbUsername | quote }} }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: api-gateway-secrets, key: db-password } }
+          ports: [ { containerPort: 5432 } ]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", {{ .Values.config.dbUsername | quote }}] }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: api-gateway-postgres } }
+        - { name: init, configMap: { name: api-gateway-postgres-init } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api-gateway-postgres, labels: { app.kubernetes.io/part-of: api-gateway } }
+spec:
+  selector: { app.kubernetes.io/name: api-gateway-postgres }
+  ports: [ { port: 5432, targetPort: 5432 } ]
+{{- end }}
+{{- if .Values.rabbitmq.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: api-gateway-rabbitmq, labels: { app.kubernetes.io/part-of: api-gateway } }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: {{ .Values.rabbitmq.storage }} } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway-rabbitmq
+  labels: { app.kubernetes.io/name: api-gateway-rabbitmq, app.kubernetes.io/part-of: api-gateway }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: api-gateway-rabbitmq } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: api-gateway-rabbitmq, app.kubernetes.io/part-of: api-gateway }
+    spec:
+      containers:
+        - name: rabbitmq
+          image: {{ include "api-gateway.infraImage" (dict "root" $ "image" .Values.rabbitmq.image) }}
+          env:
+            - { name: RABBITMQ_DEFAULT_USER, value: {{ .Values.config.rabbitmqUsername | quote }} }
+            - { name: RABBITMQ_DEFAULT_VHOST, value: {{ .Values.config.rabbitmqVhost | quote }} }
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom: { secretKeyRef: { name: api-gateway-secrets, key: rabbitmq-password } }
+          ports: [ { containerPort: 5672 }, { containerPort: 15672 } ]
+          volumeMounts: [ { name: data, mountPath: /var/lib/rabbitmq } ]
+          readinessProbe:
+            exec: { command: ["rabbitmq-diagnostics", "-q", "check_running"] }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: api-gateway-rabbitmq } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api-gateway-rabbitmq, labels: { app.kubernetes.io/part-of: api-gateway } }
+spec:
+  selector: { app.kubernetes.io/name: api-gateway-rabbitmq }
+  ports:
+    - { name: amqp, port: 5672, targetPort: 5672 }
+    - { name: management, port: 15672, targetPort: 15672 }
+{{- end }}
+{{- if .Values.clickhouse.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: api-gateway-clickhouse, labels: { app.kubernetes.io/part-of: api-gateway } }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: {{ .Values.clickhouse.storage }} } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway-clickhouse
+  labels: { app.kubernetes.io/name: api-gateway-clickhouse, app.kubernetes.io/part-of: api-gateway }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app.kubernetes.io/name: api-gateway-clickhouse } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: api-gateway-clickhouse, app.kubernetes.io/part-of: api-gateway }
+    spec:
+      containers:
+        - name: clickhouse
+          image: {{ include "api-gateway.infraImage" (dict "root" $ "image" .Values.clickhouse.image) }}
+          env:
+            - { name: CLICKHOUSE_DB, value: {{ .Values.config.clickhouseDb | quote }} }
+            - { name: CLICKHOUSE_USER, value: {{ .Values.config.clickhouseUser | quote }} }
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom: { secretKeyRef: { name: api-gateway-secrets, key: clickhouse-password } }
+          ports: [ { containerPort: 8123 }, { containerPort: 9000 } ]
+          volumeMounts: [ { name: data, mountPath: /var/lib/clickhouse } ]
+          readinessProbe:
+            httpGet: { path: /ping, port: 8123 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: api-gateway-clickhouse } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api-gateway-clickhouse, labels: { app.kubernetes.io/part-of: api-gateway } }
+spec:
+  selector: { app.kubernetes.io/name: api-gateway-clickhouse }
+  ports:
+    - { name: http, port: 8123, targetPort: 8123 }
+    - { name: native, port: 9000, targetPort: 9000 }
+{{- end }}

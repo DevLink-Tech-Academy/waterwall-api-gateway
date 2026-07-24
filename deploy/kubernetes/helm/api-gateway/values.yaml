@@ -1,0 +1,98 @@
+# ── Application images ───────────────────────────────────────────────────────
+# Full app image = {registry}/{repository}/{component}:{tag}
+# e.g. bdpmarketplace.azurecr.io/api-gateway/identity-service:1.0.0
+image:
+  registry: ""            # air-gap: set to the marketplace ACR; empty = docker.io
+  repository: api-gateway
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+# SPRING_PROFILES_ACTIVE for the Java services
+springProfile: prod
+
+# ── Secrets (override in production) ─────────────────────────────────────────
+secrets:
+  dbPassword: postgres
+  rabbitmqPassword: guest
+  clickhousePassword: ""
+
+# ── Shared backend config ────────────────────────────────────────────────────
+config:
+  dbName: gateway
+  dbUsername: postgres
+  rabbitmqUsername: guest
+  rabbitmqVhost: "/cem"
+  clickhouseDb: gateway_analytics
+  clickhouseUser: default
+  # Mail (optional) — leave blank to disable
+  mailHost: ""
+  mailPort: "1025"
+
+defaultResources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { cpu: "1",  memory: 1Gi }
+
+# ── Backend Java services ────────────────────────────────────────────────────
+# Each gets the shared DB + RabbitMQ env; extraEnv adds per-service vars.
+backend:
+  identity-service:
+    port: 8081
+  management-api:
+    port: 8082
+    extraEnv:
+      IDENTITY_SERVICE_URL: "http://identity-service:8081"
+      JWT_ISSUER_URI: "http://identity-service:8081"
+  analytics-service:
+    port: 8083
+    clickhouse: true
+    extraEnv:
+      JWT_ISSUER_URI: "http://identity-service:8081"
+  notification-service:
+    port: 8084
+  gateway-runtime:
+    port: 8080
+    extraPorts: [9090]         # management/metrics
+    extraEnv:
+      IDENTITY_SERVICE_URL: "http://identity-service:8081"
+      JWT_ISSUER_URI: "http://identity-service:8081"
+
+# ── Frontend Next.js apps ────────────────────────────────────────────────────
+# NOTE: NEXT_PUBLIC_* are read by the browser, so they must be reachable
+# externally. Default to the in-cluster service names; override to the ingress
+# host(s) for real browser access (or rebuild the image with build-time values).
+frontend:
+  gateway-portal:
+    port: 3000
+    env:
+      NEXT_PUBLIC_API_URL: "http://management-api:8082"
+      NEXT_PUBLIC_IDENTITY_URL: "http://identity-service:8081"
+      NEXT_PUBLIC_GATEWAY_URL: "http://gateway-runtime:8080"
+  gateway-admin:
+    port: 3001
+    env:
+      NEXT_PUBLIC_API_URL: "http://management-api:8082"
+      NEXT_PUBLIC_IDENTITY_URL: "http://identity-service:8081"
+      NEXT_PUBLIC_ANALYTICS_URL: "http://analytics-service:8083"
+
+# ── Bundled infrastructure (official images, matching docker-compose) ────────
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  storage: 8Gi
+rabbitmq:
+  enabled: true
+  image: rabbitmq:3.13-management-alpine
+  storage: 4Gi
+clickhouse:
+  enabled: true
+  image: clickhouse/clickhouse-server:24.3
+  storage: 8Gi
+
+# In air-gap mode the infra images are pulled from {image.registry}/tools/* too.
+airgapInfra: false
+
+# ── Ingress (optional) — exposes gateway-runtime + the two UIs ───────────────
+ingress:
+  enabled: false
+  className: nginx
+  host: api-gateway.local

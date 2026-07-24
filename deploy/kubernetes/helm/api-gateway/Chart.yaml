@@ -1,0 +1,9 @@
+apiVersion: v2
+name: api-gateway
+description: API Gateway platform — runtime, identity, management, analytics, notification + admin/portal UIs
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+# Self-contained: postgres, rabbitmq and clickhouse are bundled as plain
+# Deployments in this chart (official images, matching docker-compose) rather
+# than external subcharts — no dependency fetch, no bitnami image churn.
