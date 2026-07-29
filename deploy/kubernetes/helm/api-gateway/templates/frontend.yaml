@@ -23,9 +23,11 @@ spec:
             {{- range $k, $v := $app.env }}
             - { name: {{ $k }}, value: {{ $v | quote }} }
             {{- end }}
-            {{- if $.Values.keycloak.enabled }}
+            {{- if and $.Values.keycloak.enabled $app.keycloak }}
+            # Only apps flagged keycloak:true (the admin console) log in via BDP
+            # SSO. The developer portal stays on native identity-service auth.
             - { name: NEXT_PUBLIC_KEYCLOAK_ISSUER, value: {{ $.Values.keycloak.issuerUri | quote }} }
-            - { name: NEXT_PUBLIC_KEYCLOAK_CLIENT_ID, value: "gateway-ui" }
+            - { name: NEXT_PUBLIC_KEYCLOAK_CLIENT_ID, value: {{ $.Values.keycloak.clientId | default "gateway-ui" | quote }} }
             {{- end }}
           readinessProbe:
             tcpSocket: { port: {{ $app.port }} }

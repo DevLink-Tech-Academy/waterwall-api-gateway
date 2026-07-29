@@ -63,3 +63,6 @@ tsconfig.tsbuildinfo
 .gitnexus
 AGENTS.md
 CLAUDE.md
+
+# Local agent tooling state
+.claude-flow/

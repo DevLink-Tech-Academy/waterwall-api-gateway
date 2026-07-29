@@ -1,5 +1,6 @@
 package com.gateway.management.config;
 
+import com.gateway.common.auth.DualIssuerJwtDecoder;
 import com.gateway.common.auth.JwtAuthenticationFilter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -30,6 +31,9 @@ public class SecurityConfig {
 
     @Value("${gateway.identity.jwt.key-store-password:changeit}")
     private String signingSecret;
+
+    @Value("${gateway.keycloak.issuer-uri:${JWT_KEYCLOAK_ISSUER_URI:}}")
+    private String keycloakIssuer;
 
     @Value("${gateway.cors.allowed-origins:http://localhost:3000,http://localhost:3001}")
     private List<String> allowedOrigins;
@@ -77,12 +81,18 @@ public class SecurityConfig {
     public JwtDecoder jwtDecoder() {
         byte[] keyBytes = deriveKey(signingSecret);
         SecretKey secretKey = new SecretKeySpec(keyBytes, "HmacSHA256");
-        return NimbusJwtDecoder.withSecretKey(secretKey).build();
+        JwtDecoder hmac = NimbusJwtDecoder.withSecretKey(secretKey).build();
+        // When a Keycloak issuer is configured, accept BOTH native identity-service
+        // (HMAC) tokens and BDP Keycloak SSO tokens via issuer routing.
+        if (keycloakIssuer != null && !keycloakIssuer.isBlank()) {
+            return new DualIssuerJwtDecoder(hmac, keycloakIssuer);
+        }
+        return hmac;
     }
 
     @Bean
     public JwtAuthenticationFilter jwtAuthenticationFilter() {
-        return new JwtAuthenticationFilter(jwtDecoder());
+        return new JwtAuthenticationFilter(jwtDecoder(), keycloakIssuer);
     }
 
     @Bean

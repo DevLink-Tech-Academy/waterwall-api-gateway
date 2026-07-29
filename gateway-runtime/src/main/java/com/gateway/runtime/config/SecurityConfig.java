@@ -1,5 +1,6 @@
 package com.gateway.runtime.config;
 
+import com.gateway.common.auth.DualIssuerJwtDecoder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -36,6 +37,9 @@ public class SecurityConfig {
     @Value("${gateway.identity.jwt.key-store-password:changeit}")
     private String signingSecret;
 
+    @Value("${gateway.keycloak.issuer-uri:${JWT_KEYCLOAK_ISSUER_URI:}}")
+    private String keycloakIssuer;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
@@ -57,7 +61,13 @@ public class SecurityConfig {
     public JwtDecoder jwtDecoder() {
         byte[] keyBytes = deriveKey(signingSecret);
         SecretKey secretKey = new SecretKeySpec(keyBytes, "HmacSHA256");
-        return NimbusJwtDecoder.withSecretKey(secretKey).build();
+        JwtDecoder hmac = NimbusJwtDecoder.withSecretKey(secretKey).build();
+        // When a Keycloak issuer is configured, accept BOTH native identity-service
+        // (HMAC) tokens and BDP Keycloak SSO tokens via issuer routing.
+        if (keycloakIssuer != null && !keycloakIssuer.isBlank()) {
+            return new DualIssuerJwtDecoder(hmac, keycloakIssuer);
+        }
+        return hmac;
     }
 
     @Bean

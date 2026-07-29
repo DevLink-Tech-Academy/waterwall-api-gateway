@@ -1,5 +1,19 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8082';
-const IDENTITY_BASE = process.env.NEXT_PUBLIC_IDENTITY_URL || 'http://localhost:8081';
+// Resolve config at call-time from runtime env (window.__ENV, injected by the
+// container entrypoint into /public/__env.js) with a fall-back to the
+// build-time NEXT_PUBLIC_* value. This mirrors auth.ts's cfg() so the same
+// standalone image can be pointed at different backends per deployment —
+// otherwise Next.js bakes NEXT_PUBLIC_* at build time and they can't change.
+function cfg(key: string, fallback = ''): string {
+  if (typeof window !== 'undefined') {
+    const env = (window as unknown as { __ENV?: Record<string, string> }).__ENV;
+    if (env && env[key]) return env[key];
+  }
+  const fromProcess = (process.env as Record<string, string | undefined>)[key];
+  return fromProcess || fallback;
+}
+
+const apiBase = () => cfg('NEXT_PUBLIC_API_URL', 'http://localhost:8082');
+const identityBase = () => cfg('NEXT_PUBLIC_IDENTITY_URL', 'http://localhost:8081');
 
 // Paths that live on the identity-service, not management-api
 const IDENTITY_PATHS = ['/v1/applications', '/v1/users', '/v1/auth', '/v1/mfa', '/v1/orgs'];
@@ -42,7 +56,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const base = IDENTITY_PATHS.some(p => path.startsWith(p)) ? IDENTITY_BASE : API_BASE;
+  const base = IDENTITY_PATHS.some(p => path.startsWith(p)) ? identityBase() : apiBase();
   const res = await fetch(`${base}${path}`, {
     ...options,
     headers,

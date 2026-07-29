@@ -1,5 +1,6 @@
 package com.gateway.analytics.config;
 
+import com.gateway.common.auth.DualIssuerJwtDecoder;
 import com.gateway.common.auth.JwtAuthenticationFilter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -23,6 +24,9 @@ public class SecurityConfig {
     @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
     private String issuerUri;
 
+    @Value("${gateway.keycloak.issuer-uri:${JWT_KEYCLOAK_ISSUER_URI:}}")
+    private String keycloakIssuer;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
@@ -40,12 +44,18 @@ public class SecurityConfig {
 
     @Bean
     public JwtDecoder jwtDecoder() {
-        return JwtDecoders.fromIssuerLocation(issuerUri);
+        JwtDecoder nativeDecoder = JwtDecoders.fromIssuerLocation(issuerUri);
+        // When a Keycloak issuer is configured, accept BOTH native identity-service
+        // tokens and BDP Keycloak SSO tokens via issuer routing.
+        if (keycloakIssuer != null && !keycloakIssuer.isBlank()) {
+            return new DualIssuerJwtDecoder(nativeDecoder, keycloakIssuer);
+        }
+        return nativeDecoder;
     }
 
     @Bean
     public JwtAuthenticationFilter jwtAuthenticationFilter() {
-        return new JwtAuthenticationFilter(jwtDecoder());
+        return new JwtAuthenticationFilter(jwtDecoder(), keycloakIssuer);
     }
 
     @Bean

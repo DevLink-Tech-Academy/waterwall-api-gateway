@@ -42,8 +42,14 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  const roles: string[] = (payload.roles as string[]) || [];
-  const adminRoles = ['SUPER_ADMIN', 'PLATFORM_ADMIN', 'OPERATIONS_ADMIN', 'API_PUBLISHER_ADMIN', 'API_PUBLISHER', 'COMPLIANCE_OFFICER', 'RELEASE_MANAGER', 'POLICY_MANAGER', 'AUDITOR'];
+  // Native identity-service tokens carry roles top-level; BDP Keycloak SSO tokens
+  // carry them under realm_access.roles. Accept both.
+  const topRoles: string[] = Array.isArray(payload.roles) ? (payload.roles as string[]) : [];
+  const realmAccess = payload.realm_access as { roles?: string[] } | undefined;
+  const realmRoles: string[] = Array.isArray(realmAccess?.roles) ? (realmAccess!.roles as string[]) : [];
+  const roles: string[] = [...topRoles, ...realmRoles];
+  // 'admin' is the BDP Keycloak realm role (maps to SUPER_ADMIN on the backends).
+  const adminRoles = ['SUPER_ADMIN', 'PLATFORM_ADMIN', 'OPERATIONS_ADMIN', 'API_PUBLISHER_ADMIN', 'API_PUBLISHER', 'COMPLIANCE_OFFICER', 'RELEASE_MANAGER', 'POLICY_MANAGER', 'AUDITOR', 'admin'];
   const isAdmin = roles.some(r => adminRoles.includes(r));
 
   if (!isAdmin) {
