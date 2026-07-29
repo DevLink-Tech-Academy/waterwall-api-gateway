@@ -1,0 +1,49 @@
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+# One ServiceMonitor covering all five backend services. They are selected by
+# the shared part-of/component label pair rather than one ServiceMonitor per
+# service: every backend exposes the same actuator endpoint on the same port,
+# so a single selector is enough and stays correct when a service is added.
+#
+# Requires the Prometheus Operator CRD. Left off by default (see values.yaml)
+# so `helm install` still works on a cluster with no observability stack —
+# rendering a ServiceMonitor there fails the whole release.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-metrics
+  {{- if .Values.metrics.serviceMonitor.namespace }}
+  namespace: {{ .Values.metrics.serviceMonitor.namespace }}
+  {{- end }}
+  labels:
+    app.kubernetes.io/name: api-gateway
+    app.kubernetes.io/part-of: api-gateway
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: api-gateway
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: metrics
+      # Spring Boot serves the Prometheus registry here, not at /metrics —
+      # /actuator/metrics is the JSON actuator endpoint and is NOT parseable
+      # by Prometheus.
+      path: /actuator/prometheus
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+      # Every backend reports the same jvm_*/http_server_requests_* series, so
+      # without this each service overwrites the others in a shared dashboard
+      # panel. `service` is derived from the Service name minus the -metrics
+      # suffix, giving the dashboard something to break panels down by.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_service_name]
+          regex: (.+)-metrics
+          targetLabel: service
+          replacement: $1
+          action: replace
+{{- end }}

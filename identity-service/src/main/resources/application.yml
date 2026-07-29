@@ -78,10 +78,18 @@ spring:
 
 # Actuator
 management:
+  # Actuator is moved off the application port so /actuator/prometheus is not
+  # reachable through this service's NodePort -- several of these services are
+  # exposed on the node and their metrics would otherwise be world-readable.
+  # Scraped cluster-internally instead, via the <name>-metrics ClusterIP
+  # Service. Health probes target 9090 too, since actuator no longer answers
+  # on the application port at all.
+  server:
+    port: 9090
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: when_authorized

@@ -6,7 +6,7 @@ image:
   # chart is self-consistent. Override for a different registry.
   registry: "bdpmarketplace.azurecr.io"
   repository: api-gateway
-  tag: "1.0.0"
+  tag: "1.0.2"
   pullPolicy: IfNotPresent
 
 # Pull secret(s) for the (private) app-image registry. BDP provisions the
@@ -53,33 +53,51 @@ defaultResources:
 backend:
   identity-service:
     port: 8081
+    nodePort: 32243            # browser-reachable so the portal/admin can call /v1/auth,/v1/applications (NSG-open port)
+    extraEnv:
+      # The developer portal (:30830) and admin console (:31383) are cross-origin
+      # to this service, so their origins must be allowed for CORS (login/register).
+      GATEWAY_CORS_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:3001,http://20.254.64.152:30830,http://20.254.64.152:31383"
   management-api:
     port: 8082
+    nodePort: 31762            # browser-reachable so the portal/admin can call management APIs (NSG-open port)
     extraEnv:
       IDENTITY_SERVICE_URL: "http://identity-service:8081"   # for identity API calls
+      GATEWAY_CORS_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:3001,http://20.254.64.152:30830,http://20.254.64.152:31383"
   analytics-service:
     port: 8083
     clickhouse: true
+    nodePort: 31880            # browser-reachable so the admin console can call analytics APIs (NSG-open port)
+    extraEnv:
+      GATEWAY_CORS_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:3001,http://20.254.64.152:30830,http://20.254.64.152:31383"
   notification-service:
     port: 8084
   gateway-runtime:
     port: 8080
-    extraPorts: [9090]         # management/metrics
-    nodePort: 30820            # exposed so the BDP UI can show the Gateway URL
+    # extraPorts no longer carries 9090. That was the management/metrics port,
+    # and it is now declared once for every backend via metrics.port below.
+    # Listing it here as well would add 9090 to the NodePort Service, and a
+    # NodePort Service gets a node port allocated for EVERY port it lists —
+    # publishing /actuator/prometheus on the host, which is exactly what the
+    # separate ClusterIP -metrics Service exists to avoid.
+    nodePort: 30609            # exposed so the BDP UI can show the Gateway URL (NSG-open port)
     extraEnv:
       IDENTITY_SERVICE_URL: "http://identity-service:8081"
 
-# ── Keycloak / OIDC integration ──────────────────────────────────────────────
+# ── Keycloak / BDP SSO integration (admin console only) ──────────────────────
 # When enabled, the resource servers (management-api, analytics, notification,
-# gateway-runtime) validate JWTs against Keycloak instead of the built-in
-# identity-service — i.e. the whole platform trusts BDP's Keycloak identity.
-# The services only require an authenticated valid token (@PreAuthorize
-# isAuthenticated), so any Keycloak-issued JWT is accepted; no role converter
-# is needed. issuerUri = the realm issuer, e.g.
-#   http://<keycloak-host>:8080/realms/bdp
+# gateway-runtime) get a SECOND, additive issuer via JWT_KEYCLOAK_ISSUER_URI: a
+# dual-issuer JWT decoder routes each token to Keycloak (RS256/JWKS) or the
+# native identity-service decoder (HMAC) by its iss claim. So BOTH native
+# identity-service tokens AND BDP Keycloak SSO tokens are accepted platform-wide.
+# The KC "admin" realm role is mapped to SUPER_ADMIN so admins bypass permission
+# checks. Only the frontend flagged keycloak:true (gateway-admin) logs in via SSO
+# — the developer portal stays on native identity-service auth, and
+# identity-service's own auth is never changed. issuerUri = the realm issuer.
 keycloak:
-  enabled: false
-  issuerUri: ""
+  enabled: true
+  issuerUri: "http://20.254.64.152:8080/realms/bdp"
+  clientId: "gateway-ui"
 
 # ── Frontend Next.js apps ────────────────────────────────────────────────────
 # NOTE: NEXT_PUBLIC_* are read by the browser, so they must be reachable
@@ -89,17 +107,22 @@ frontend:
   gateway-portal:
     port: 3000
     nodePort: 30830           # Developer Portal URL
+    # Browser-visible backend URLs. These are read by the browser, so they must
+    # be node-reachable (external), not in-cluster service names. Ports match the
+    # identity-service / management-api / gateway-runtime NodePorts above.
     env:
-      NEXT_PUBLIC_API_URL: "http://management-api:8082"
-      NEXT_PUBLIC_IDENTITY_URL: "http://identity-service:8081"
-      NEXT_PUBLIC_GATEWAY_URL: "http://gateway-runtime:8080"
+      NEXT_PUBLIC_API_URL: "http://20.254.64.152:31762"
+      NEXT_PUBLIC_IDENTITY_URL: "http://20.254.64.152:32243"
+      NEXT_PUBLIC_GATEWAY_URL: "http://20.254.64.152:30609"
   gateway-admin:
     port: 3001
-    nodePort: 30831           # Admin Console URL
+    nodePort: 31383           # Admin Console URL (NSG-open port)
+    keycloak: true            # admin console logs in via BDP Keycloak SSO
     env:
-      NEXT_PUBLIC_API_URL: "http://management-api:8082"
-      NEXT_PUBLIC_IDENTITY_URL: "http://identity-service:8081"
-      NEXT_PUBLIC_ANALYTICS_URL: "http://analytics-service:8083"
+      NEXT_PUBLIC_API_URL: "http://20.254.64.152:31762"
+      NEXT_PUBLIC_IDENTITY_URL: "http://20.254.64.152:32243"
+      NEXT_PUBLIC_ANALYTICS_URL: "http://20.254.64.152:31880"
+      NEXT_PUBLIC_GATEWAY_URL: "http://20.254.64.152:30609"
 
 # ── Bundled infrastructure (official images, matching docker-compose) ────────
 postgres:
@@ -117,6 +140,32 @@ clickhouse:
 
 # In air-gap mode the infra images are pulled from {image.registry}/tools/* too.
 airgapInfra: false
+
+# ── Metrics / Grafana ────────────────────────────────────────────────────────
+# Every backend service runs actuator on its own port (management.server.port
+# in each application.yml) and publishes the Prometheus registry at
+# /actuator/prometheus. That port is served by a per-service ClusterIP Service
+# named <name>-metrics, never by the NodePort Service the app itself uses —
+# see the comment in templates/backend.yaml for why that separation matters.
+metrics:
+  # Turning this off drops the -metrics Services and the container port. The
+  # services still expose actuator on this port internally, because the probes
+  # depend on it; this only controls whether it is reachable Service-side.
+  enabled: true
+  port: 9090
+  serviceMonitor:
+    # OFF by default on purpose. A ServiceMonitor needs the Prometheus Operator
+    # CRD, and rendering one on a cluster without it fails the entire release —
+    # so a plain `helm install` must not assume observability is present. BDP
+    # turns this on through the descriptor's monitoring.values block when the
+    # observability stack is installed.
+    enabled: false
+    # Left empty so it lands in the release namespace. Set only when Prometheus
+    # is configured to discover ServiceMonitors from one specific namespace.
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
 
 # ── Ingress (optional) — exposes gateway-runtime + the two UIs ───────────────
 ingress:

@@ -18,19 +18,30 @@ spec:
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           ports:
             - { name: http, containerPort: {{ $svc.port }} }
+            # Actuator's own port (management.server.port in each service's
+            # application.yml). Deliberately NOT added to the Service below —
+            # that Service is type NodePort for several of these, and Kubernetes
+            # allocates a node port for EVERY port it lists, which would publish
+            # /actuator/prometheus on the host. The separate <name>-metrics
+            # ClusterIP Service exposes it in-cluster instead.
+            - { name: metrics, containerPort: {{ $.Values.metrics.port }} }
             {{- range $svc.extraPorts }}
             - { name: port-{{ . }}, containerPort: {{ . }} }
             {{- end }}
           env:
             {{- include "api-gateway.backendEnv" $ | nindent 12 }}
+            # Native IdP issuer — the dual-issuer decoder keeps validating
+            # identity-service tokens against this even when Keycloak SSO is on.
             - name: JWT_ISSUER_URI
-              {{- if eq $name "identity-service" }}
-              value: "http://identity-service:8081"   # the IdP issues as itself
-              {{- else if $.Values.keycloak.enabled }}
-              value: {{ $.Values.keycloak.issuerUri | required "keycloak.issuerUri is required when keycloak.enabled" | quote }}
-              {{- else }}
               value: "http://identity-service:8081"
+              {{- if eq $name "identity-service" }}   # the IdP issues as itself
               {{- end }}
+            {{- if and $.Values.keycloak.enabled (ne $name "identity-service") }}
+            # Second, additive issuer: resource servers ALSO accept BDP Keycloak
+            # SSO tokens (admin console). identity-service is never touched.
+            - name: JWT_KEYCLOAK_ISSUER_URI
+              value: {{ $.Values.keycloak.issuerUri | required "keycloak.issuerUri is required when keycloak.enabled" | quote }}
+            {{- end }}
             {{- range $k, $v := $svc.extraEnv }}
             - { name: {{ $k }}, value: {{ $v | quote }} }
             {{- end }}
@@ -42,14 +53,18 @@ spec:
             - name: CLICKHOUSE_PASSWORD
               valueFrom: { secretKeyRef: { name: api-gateway-secrets, key: clickhouse-password } }
             {{- end }}
+          # Probes follow actuator to the management port. With
+          # management.server.port set, actuator no longer answers on the
+          # application port at all, so leaving these on $svc.port would fail
+          # every probe and CrashLoop the whole platform.
           livenessProbe:
-            httpGet: { path: /actuator/health/liveness, port: {{ $svc.port }} }
+            httpGet: { path: /actuator/health/liveness, port: {{ $.Values.metrics.port }} }
             initialDelaySeconds: 60
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 6
           readinessProbe:
-            httpGet: { path: /actuator/health/readiness, port: {{ $svc.port }} }
+            httpGet: { path: /actuator/health/readiness, port: {{ $.Values.metrics.port }} }
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
@@ -77,4 +92,28 @@ spec:
     - { name: port-{{ . }}, port: {{ . }}, targetPort: {{ . }} }
     {{- end }}
 ---
+{{- if $.Values.metrics.enabled }}
+# Metrics-only Service, always ClusterIP. Separate from the Service above
+# because that one is NodePort for several services and Kubernetes allocates a
+# node port for every port a NodePort Service lists — putting the actuator port
+# there would publish /actuator/prometheus on the host. This keeps the scrape
+# target reachable only from inside the cluster, which is also why the
+# management port can be left unauthenticated.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-metrics
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/part-of: api-gateway
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: {{ $name }} }
+  ports:
+    - name: metrics
+      port: {{ $.Values.metrics.port }}
+      targetPort: {{ $.Values.metrics.port }}
+---
+{{- end }}
 {{- end }}
